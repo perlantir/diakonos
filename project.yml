@@ -54,3 +54,4 @@ targets:
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Diakonos/Diakonos.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
