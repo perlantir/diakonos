@@ -6,6 +6,9 @@ struct DiakonosApp: App {
 
     init() {
         XpraSuppressor.suppressOnLaunch()
+        // v1.4: bootstrap MCP registration synchronously BEFORE any pane
+        // spawns so claude/codex see the server at their startup.
+        MCPRegistration.shared.bootstrap()
     }
 
     var body: some Scene {

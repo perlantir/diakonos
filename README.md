@@ -12,7 +12,20 @@ Open source, MIT.
 
 ## Status
 
-v1.3 in active development. Not yet released.
+v1.4 in active development. Installed locally to `/Applications/Diakonos.app`;
+not yet code-signed or notarized.
+
+## Install
+
+```
+xcodebuild -configuration Release build
+cp -R build/release/Build/Products/Release/Diakonos.app /Applications/
+xattr -dr com.apple.quarantine /Applications/Diakonos.app
+```
+
+**First launch:** right-click → Open → Open (Diakonos is unsigned in v1.4;
+Developer ID + notarization is v1.5+). After that first trust, Spotlight,
+Launchpad, and Dock launch work normally.
 
 ## What's in v1.3 (built on v1.2)
 

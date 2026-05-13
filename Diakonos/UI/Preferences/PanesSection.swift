@@ -1,21 +1,27 @@
 import SwiftUI
 
+/// v1.4 — reads slots from `WorkspaceLayout` directly so reassignments
+/// (including Codex) reflect here. v1.3 hard-iterated the old PaneKind enum
+/// which never grew a `.codex` case — that left a shipped-broken row.
 struct PanesSection: View {
     @ObservedObject var preferences: Preferences
+    @StateObject private var layout = WorkspaceLayout()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.s5) {
 
-                PreferencesSection(title: "Layout",
-                                   subtitle: "v1.1 ships with the four hardcoded panes shown below. Custom layouts arrive in v0.2.") {
-                    ForEach(PaneKind.allCases) { kind in
-                        PreferenceRow(label: kind.title,
-                                      detail: positionLabel(for: kind)) {
+                PreferencesSection(
+                    title: "Layout",
+                    subtitle: "v1.2+ slots are reassignable from the Close button on each pane. This list shows what each slot is currently set to."
+                ) {
+                    ForEach(layout.slots) { slot in
+                        PreferenceRow(label: layout.title(for: slot),
+                                      detail: positionLabel(for: slot.position)) {
                             HStack(spacing: DesignTokens.Spacing.s2) {
-                                Image(systemName: kind.iconSystemName)
+                                Image(systemName: slot.kind.iconSystemName)
                                     .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(kind.accent)
+                                    .foregroundStyle(accent(for: slot.kind))
                                     .frame(width: 20, height: 20)
                             }
                         }
@@ -45,12 +51,22 @@ struct PanesSection: View {
         }
     }
 
-    private func positionLabel(for kind: PaneKind) -> String {
+    private func positionLabel(for position: PaneSlotPosition) -> String {
+        switch position {
+        case .topLeft:     return "Top-left"
+        case .topRight:    return "Top-right"
+        case .bottomLeft:  return "Bottom-left"
+        case .bottomRight: return "Bottom-right"
+        }
+    }
+
+    private func accent(for kind: PaneSlotKind) -> Color {
         switch kind {
-        case .terminal:    return "Top-left · native"
-        case .claudeCode:  return "Top-right · native"
-        case .terminal2:   return "Bottom-left · native"
-        case .browser:     return "Bottom-right · sandboxed Chromium"
+        case .empty:      return DesignTokens.Palette.textMuted
+        case .terminal:   return DesignTokens.Palette.statusHealthy
+        case .claudeCode: return Color(hex: 0x8B5CF6)
+        case .codex:      return Color(hex: 0x10A37F)
+        case .browser:    return preferences.accentColor
         }
     }
 }

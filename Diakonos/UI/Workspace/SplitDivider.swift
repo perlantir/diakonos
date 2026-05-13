@@ -10,6 +10,7 @@ struct SplitDivider: View {
     let onDrag: (CGFloat) -> Void
     let onDragEnded: () -> Void
 
+    @EnvironmentObject private var preferences: Preferences
     @State private var hovering = false
     @State private var dragging = false
 
@@ -21,9 +22,9 @@ struct SplitDivider: View {
             Rectangle()
                 .fill(
                     dragging
-                        ? DesignTokens.Palette.accentPrimary.opacity(0.35)
+                        ? preferences.accentColor.opacity(0.35)
                         : hovering
-                            ? DesignTokens.Palette.accentSoft
+                            ? preferences.accentColor.opacity(0.18)
                             : Color.clear
                 )
 
@@ -31,7 +32,7 @@ struct SplitDivider: View {
             Rectangle()
                 .fill(
                     dragging
-                        ? DesignTokens.Palette.accentPrimary
+                        ? preferences.accentColor
                         : DesignTokens.Palette.borderSoft
                 )
                 .frame(

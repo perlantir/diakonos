@@ -187,14 +187,18 @@ def call_tool(name: str, args: dict[str, Any]) -> dict:
             res = cua_post("type", {"text": str(args.get("text", ""))})
             return content_text(json.dumps(res))
         if name == "browser_key":
-            # cuabot's /key endpoint returns 404 (verified in v1.3 discovery).
-            # Use xdotool-via-bash; xdotool may be absent so we also try CDP
-            # Input.dispatchKeyEvent through the chromium helper.
-            name_ = args["name"]
+            # v1.4 routes through the Diakonos-installed Python CDP helper
+            # instead of xdotool (which isn't installed in the cua container).
+            # Helper signature: `key <name> <comma-modifiers>`.
+            name_ = str(args["name"])
             mods = args.get("modifiers") or []
-            key_arg = "+".join(mods + [name_]) if mods else name_
-            esc = key_arg.replace("'", "'\\''")
-            cmd = f"DISPLAY=:100 xdotool key --clearmodifiers '{esc}' 2>&1 || echo XDOTOOL_FAILED"
+            mods_arg = ",".join(mods)
+            ename = name_.replace("'", "'\\''")
+            emods = mods_arg.replace("'", "'\\''")
+            cmd = (
+                f"python3 /tmp/diakonos-nav.py key '{ename}' '{emods}' 2>&1 "
+                f"|| echo HELPER_FAILED"
+            )
             res = cua_post("bash", {"command": cmd})
             return content_text(json.dumps(res))
         if name == "browser_scroll":

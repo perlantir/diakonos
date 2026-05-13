@@ -57,9 +57,10 @@ enum XpraSuppressor {
     private static func startMonitor() {
         monitorTask?.cancel()
         monitorTask = Task.detached {
-            // Poll for the first 60 s after launch; that's the window where
-            // cuabot's container connect typically triggers the Mac Xpra app.
-            for _ in 0..<20 {
+            // v1.4: poll for the lifetime of Diakonos (v1.3 capped at 60 s
+            // and missed lazy Xpra spawns after that window). Task is
+            // cancelled implicitly when the app exits.
+            while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 if Task.isCancelled { return }
                 kill()

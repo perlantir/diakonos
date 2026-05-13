@@ -39,16 +39,17 @@ struct BrowserPaneView: View {
             .onDisappear {
                 stream.stop()
             }
-            .task(id: bucketed(geo.size)) {
+            .task(id: "\(bucketed(geo.size))|\(sandbox.state)") {
                 // Debounce 200 ms on the bucketed view size, then ask Chromium
                 // to resize itself to the current pane size so the screenshot
                 // aspect-ratio matches the viewer.
                 guard sandbox.state == .running else { return }
                 let bucket = bucketed(geo.size)
-                guard bucket != lastResizeBucket else { return }
+                let resizeKey = "\(bucket)|\(sandbox.state)"
+                guard resizeKey != lastResizeBucket else { return }
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 guard bucketed(geo.size) == bucket else { return }
-                lastResizeBucket = bucket
+                lastResizeBucket = resizeKey
                 let w = Int(geo.size.width)
                 let h = Int(max(geo.size.height - 40, 1)) // minus URL bar
                 await sandbox.setWindowSize(width: w, height: h)
@@ -86,26 +87,27 @@ struct BrowserPaneView: View {
                 stream: stream,
                 input: input,
                 focused: $hasFocus,
-                focusPosition: focusPosition
+                focusPosition: focusPosition,
+                focusRingColor: NSColor(preferences.accentColor)
             )
         case .running:
             InitializingPaneBody(
                 iconSystemName: "globe",
-                accent: DesignTokens.Palette.accentPrimary,
+                accent: preferences.accentColor,
                 title: "Browser",
                 message: "Waiting for the first sandbox frame…"
             )
         case .initializing, .warning:
             InitializingPaneBody(
                 iconSystemName: "globe",
-                accent: DesignTokens.Palette.accentPrimary,
+                accent: preferences.accentColor,
                 title: "Browser",
                 message: sandbox.statusMessage.isEmpty ? "Sandbox initializing…" : sandbox.statusMessage
             )
         case .error:
             InitializingPaneBody(
                 iconSystemName: "globe",
-                accent: DesignTokens.Palette.accentPrimary,
+                accent: preferences.accentColor,
                 title: "Browser",
                 message: sandbox.statusMessage
             )
@@ -118,7 +120,7 @@ struct BrowserPaneView: View {
         case .stopped:
             InitializingPaneBody(
                 iconSystemName: "globe",
-                accent: DesignTokens.Palette.accentPrimary,
+                accent: preferences.accentColor,
                 title: "Browser",
                 message: "Sandbox stopped"
             )
@@ -223,6 +225,7 @@ struct SandboxScreenView: NSViewRepresentable {
     @ObservedObject var input: SandboxInput
     @Binding var focused: Bool
     var focusPosition: PaneSlotPosition?
+    var focusRingColor: NSColor = NSColor(srgbRed: 47/255, green: 107/255, blue: 1.0, alpha: 1.0)
 
     func makeCoordinator() -> Coordinator {
         Coordinator(stream: stream, input: input, focused: $focused)
@@ -231,6 +234,7 @@ struct SandboxScreenView: NSViewRepresentable {
     func makeNSView(context: Context) -> SandboxScreenNSView {
         let view = SandboxScreenNSView()
         view.coordinator = context.coordinator
+        view.focusRingColor = focusRingColor
         if let pos = focusPosition {
             PaneFocusRegistry.shared.register(view, at: pos)
         }
@@ -241,6 +245,7 @@ struct SandboxScreenView: NSViewRepresentable {
         if let pos = focusPosition {
             PaneFocusRegistry.shared.register(nsView, at: pos)
         }
+        nsView.focusRingColor = focusRingColor
         nsView.imageBoxNeedsRedraw(stream.latestImage)
     }
 
@@ -261,6 +266,7 @@ struct SandboxScreenView: NSViewRepresentable {
 /// inside its bounds, and forwards keyboard while it's first responder.
 final class SandboxScreenNSView: NSView {
     var coordinator: SandboxScreenView.Coordinator?
+    var focusRingColor: NSColor = NSColor(srgbRed: 47/255, green: 107/255, blue: 1.0, alpha: 1.0)
     private var currentImage: NSImage?
 
     override init(frame frameRect: NSRect) {
@@ -299,7 +305,7 @@ final class SandboxScreenNSView: NSView {
                      hints: [.interpolation: NSImageInterpolation.medium])
         }
         if coordinator?.focused == true {
-            NSColor(srgbRed: 47/255, green: 107/255, blue: 1.0, alpha: 1.0).setStroke()
+            focusRingColor.setStroke()
             let path = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
             path.lineWidth = 1
             path.stroke()

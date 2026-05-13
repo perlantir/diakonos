@@ -15,26 +15,38 @@ final class MCPRegistration {
 
     nonisolated static let serverName = "diakonos-browser"
 
-    private var claudeDone = false
-    private var codexDone = false
-
     private var scriptURL: URL? {
         Bundle.main.url(forResource: "mcp_browser", withExtension: "py")
     }
 
     // MARK: - Public API
 
-    func ensureClaudeRegistered() {
-        guard !claudeDone, let script = scriptURL else { return }
-        claudeDone = true
-        Task.detached { Self.registerClaude(scriptPath: script.path) }
+    /// **Synchronous** bootstrap. Called from `DiakonosApp.init()` before any
+    /// pane spawns so the MCP server is in the agent's config at the moment
+    /// the agent starts up. v1.3 registered inside `onSpawn`, AFTER the PTY
+    /// already invoked claude/codex — claude reads `~/.claude.json` at
+    /// startup and never re-reads, so the v1.3 server entry was visible at
+    /// the Mac shell level but not inside the running pane. That was the
+    /// v1.3 headline bug. v1.4 fixes it by writing the config first.
+    ///
+    /// Idempotent: each call removes any existing `diakonos-browser` entry
+    /// and re-adds, so a re-launch picks up a new Diakonos bundle path
+    /// (DerivedData vs /Applications) automatically.
+    func bootstrap() {
+        guard let script = scriptURL else {
+            NSLog("[Diakonos MCP] mcp_browser.py not found in bundle resources")
+            return
+        }
+        // Synchronous calls — both CLIs return in ~0.5s. Total ~1s added to
+        // app launch, acceptable.
+        Self.registerClaude(scriptPath: script.path)
+        Self.registerCodex(scriptPath: script.path)
     }
 
-    func ensureCodexRegistered() {
-        guard !codexDone, let script = scriptURL else { return }
-        codexDone = true
-        Task.detached { Self.registerCodex(scriptPath: script.path) }
-    }
+    /// Legacy methods kept as no-ops so v1.3 callers (panes' onSpawn) compile
+    /// without ceremony. Bootstrap-on-launch makes them obsolete.
+    func ensureClaudeRegistered() { /* handled by bootstrap() now */ }
+    func ensureCodexRegistered() { /* handled by bootstrap() now */ }
 
     // MARK: - Internals
 

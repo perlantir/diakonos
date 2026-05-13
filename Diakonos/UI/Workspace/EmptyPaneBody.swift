@@ -1,15 +1,16 @@
 import SwiftUI
 
 /// Empty pane placeholder per `design/screens/07-empty-pane.png`. Shows a
-/// dropdown the user clicks to assign a kind (Terminal / Claude Code /
+/// dropdown the user clicks to assign a kind (Terminal / Claude Code / Codex /
 /// Browser) to this slot.
 struct EmptyPaneBody: View {
     let slotID: UUID
     @ObservedObject var layout: WorkspaceLayout
+    @EnvironmentObject private var preferences: Preferences
 
     @State private var hovering = false
 
-    private let kinds: [PaneSlotKind] = [.terminal, .claudeCode, .browser]
+    private let kinds: [PaneSlotKind] = [.terminal, .claudeCode, .codex, .browser]
 
     var body: some View {
         VStack(spacing: DesignTokens.Spacing.s4) {
@@ -57,8 +58,8 @@ struct EmptyPaneBody: View {
                 .background(
                     RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
                         .fill(hovering
-                              ? DesignTokens.Palette.accentHover
-                              : DesignTokens.Palette.accentPrimary)
+                              ? preferences.accentColor.opacity(0.85)
+                              : preferences.accentColor)
                 )
                 .contentShape(Rectangle())
             }

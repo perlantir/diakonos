@@ -186,25 +186,97 @@ final class BrowserSandbox: ObservableObject {
         //    forward / resize. Single Python script so the WebSocket
         //    connection setup is shared.
         let script = """
-        import json, sys, urllib.request, asyncio
+        import json, sys, os, subprocess, urllib.request, asyncio
+
+        CDP_PORT = \(cdpPort)
+        # (mode_name, w, h) — cuabot's xrandr uses '754x394@50' / '2560x1440@50';
+        # the third option '8192x4096' has no @ suffix.
+        XRANDR_MODES = [('754x394@50', 754, 394), ('2560x1440@50', 2560, 1440)]
+
+        def closest_mode(w, h):
+            for name, mw, mh in XRANDR_MODES:
+                if mw >= w and mh >= h:
+                    return (name, mw, mh)
+            return XRANDR_MODES[-1]
+
+        def run_silently(*cmd):
+            try:
+                subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4)
+            except Exception:
+                pass
+
         async def cdp_session():
             try:
                 import websockets
             except Exception:
                 print('HELPER_FAILED: websockets not available')
                 return None, None
-            data = urllib.request.urlopen('http://localhost:\(cdpPort)/json', timeout=2).read()
+            data = urllib.request.urlopen(f'http://localhost:{CDP_PORT}/json', timeout=2).read()
             tabs = [t for t in json.loads(data) if t.get('type')=='page']
             if not tabs:
                 print('HELPER_FAILED: no tabs'); return None, None
             ws_url = tabs[0]['webSocketDebuggerUrl']
             ws = await websockets.connect(ws_url, ping_interval=None)
             return ws, tabs[0]
+
         async def send(ws, method, params=None, mid=1):
             await ws.send(json.dumps({'id': mid, 'method': method, 'params': params or {}}))
             return await ws.recv()
-        async def main(action, arg):
-            ws, _tab = await cdp_session()
+
+        async def dispatch_key(ws, name, modifiers):
+            # CDP modifier bitmask: 1=Alt, 2=Ctrl, 4=Meta/Cmd, 8=Shift
+            BITS = {'alt': 1, 'ctrl': 2, 'meta': 4, 'super': 4, 'cmd': 4, 'shift': 8}
+            bits = 0
+            for m in modifiers:
+                bits |= BITS.get(m.lower(), 0)
+            # Map name → (key, code, keyCode)
+            SPECIAL = {
+                'Return':    ('Enter',      'Enter',      13),
+                'Enter':     ('Enter',      'Enter',      13),
+                'Tab':       ('Tab',        'Tab',         9),
+                'Escape':    ('Escape',     'Escape',     27),
+                'Esc':       ('Escape',     'Escape',     27),
+                'BackSpace': ('Backspace',  'Backspace',   8),
+                'Backspace': ('Backspace',  'Backspace',   8),
+                'Delete':    ('Delete',     'Delete',     46),
+                'Left':      ('ArrowLeft',  'ArrowLeft',  37),
+                'Right':     ('ArrowRight', 'ArrowRight', 39),
+                'Up':        ('ArrowUp',    'ArrowUp',    38),
+                'Down':      ('ArrowDown',  'ArrowDown',  40),
+                'Home':      ('Home',       'Home',       36),
+                'End':       ('End',        'End',        35),
+                'Page_Up':   ('PageUp',     'PageUp',     33),
+                'Page_Down': ('PageDown',   'PageDown',   34),
+                'PageUp':    ('PageUp',     'PageUp',     33),
+                'PageDown':  ('PageDown',   'PageDown',   34),
+                'Space':     (' ',          'Space',      32),
+            }
+            for i in range(1, 13):
+                SPECIAL[f'F{i}'] = (f'F{i}', f'F{i}', 111 + i)
+            if name in SPECIAL:
+                key, code, kc = SPECIAL[name]
+                payload_down = {'type':'keyDown', 'key': key, 'code': code, 'windowsVirtualKeyCode': kc, 'modifiers': bits}
+                payload_up   = {'type':'keyUp',   'key': key, 'code': code, 'windowsVirtualKeyCode': kc, 'modifiers': bits}
+            else:
+                # Printable single-char (with optional modifier chord). For
+                # multi-char names not in SPECIAL, fall back to typing the
+                # raw character.
+                ch = name if len(name) == 1 else name[:1]
+                if not ch:
+                    print('HELPER_FAILED: empty key name')
+                    return False
+                payload_down = {'type':'keyDown', 'key': ch, 'text': ch, 'modifiers': bits}
+                payload_up   = {'type':'keyUp',   'key': ch, 'modifiers': bits}
+                if bits == 0:
+                    payload_down['type'] = 'char'
+                    payload_up = None
+            await send(ws, 'Input.dispatchKeyEvent', payload_down, 50)
+            if payload_up is not None:
+                await send(ws, 'Input.dispatchKeyEvent', payload_up, 51)
+            return True
+
+        async def main(action, arg, arg2=''):
+            ws, tab = await cdp_session()
             if ws is None: return 1
             try:
                 if action == 'navigate':
@@ -229,26 +301,53 @@ final class BrowserSandbox: ObservableObject {
                         w, h = int(w_s), int(h_s)
                     except Exception:
                         print('HELPER_FAILED: bad resize arg'); await ws.close(); return 1
-                    # Find browser-level window for this target via Browser.getWindowForTarget
-                    target_id = _tab.get('id') or _tab.get('targetId')
+                    # 1) Switch the X display to the closest available mode.
+                    mode_name, mw, mh = closest_mode(w, h)
+                    env = os.environ.copy(); env['DISPLAY'] = ':100'
+                    subprocess.run(['xrandr', '--output', 'screen', '--mode', mode_name],
+                                   check=False, env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=4)
+                    # Clamp Chromium target to the chosen display size.
+                    cw = min(w, mw); ch = min(h, mh)
+                    # 2) Browser.setWindowBounds via CDP.
+                    target_id = tab.get('id') or tab.get('targetId')
                     if target_id:
                         gw = await send(ws, 'Browser.getWindowForTarget', {'targetId': target_id}, 2)
                         try:
                             window_id = json.loads(gw)['result']['windowId']
                             await send(ws, 'Browser.setWindowBounds',
-                                       {'windowId': window_id, 'bounds': {'width': w, 'height': h, 'windowState': 'normal'}}, 3)
+                                       {'windowId': window_id,
+                                        'bounds': {'left': 0, 'top': 0, 'width': cw, 'height': ch,
+                                                   'windowState': 'normal'}}, 3)
                         except Exception as e:
-                            print(f'HELPER_FAILED: setWindowBounds: {e}'); await ws.close(); return 1
+                            pass  # fall through to wmctrl
+                    # 3) wmctrl to reposition+resize. Matches any Chromium-titled window.
+                    subprocess.run(['wmctrl', '-r', 'Chromium', '-e', f'0,0,0,{cw},{ch}'],
+                                   check=False, env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=4)
+                    subprocess.run(['wmctrl', '-r', 'Google', '-e', f'0,0,0,{cw},{ch}'],
+                                   check=False, env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=4)
+                elif action == 'key':
+                    # arg = name (Return, Tab, Escape, ...), arg2 = "ctrl,shift,..." or ""
+                    modifiers = [m for m in (arg2.split(',') if arg2 else []) if m]
+                    ok = await dispatch_key(ws, arg, modifiers)
+                    if not ok: await ws.close(); return 1
                 else:
                     print(f'HELPER_FAILED: unknown action {action}'); await ws.close(); return 1
                 print('HELPER_OK')
                 return 0
             finally:
                 await ws.close()
+
         if __name__ == '__main__':
             action = sys.argv[1] if len(sys.argv) > 1 else 'navigate'
-            arg = sys.argv[2] if len(sys.argv) > 2 else ''
-            sys.exit(asyncio.run(main(action, arg)) or 0)
+            arg    = sys.argv[2] if len(sys.argv) > 2 else ''
+            arg2   = sys.argv[3] if len(sys.argv) > 3 else ''
+            sys.exit(asyncio.run(main(action, arg, arg2)) or 0)
         """
         // Write via base64 to avoid shell-quote escaping headaches.
         let b64 = Data(script.utf8).base64EncodedString()

@@ -4,12 +4,14 @@ struct WorkspaceToolbar: View {
     var onSettings: () -> Void = {}
     var onFullscreen: () -> Void = {}
 
+    @EnvironmentObject private var preferences: Preferences
+
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.s3) {
             HStack(spacing: DesignTokens.Spacing.s2) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(DesignTokens.Palette.accentPrimary)
+                        .fill(preferences.accentColor)
                         .frame(width: 18, height: 18)
                     Image(systemName: "cube.fill")
                         .font(.system(size: 10, weight: .bold))
