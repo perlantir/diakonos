@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// 2x2 pane grid with two draggable dividers. Phase 3: all four panes live.
+/// 2x2 pane grid with two draggable dividers.
+/// v1.1: three panes are native (Terminal, Claude Code, Terminal 2). Only
+/// the Browser pane reaches into a sandbox, and its state lives in its own
+/// BrowserSandbox manager — no global sandbox env-object.
 struct WorkspaceView: View {
-    @EnvironmentObject private var sandbox: CUASandboxManager
+    @EnvironmentObject private var preferences: Preferences
 
     private let topLeft: PaneKind  = .terminal
     private let topRight: PaneKind = .claudeCode
-    private let botLeft: PaneKind  = .hermesAgent
+    private let botLeft: PaneKind  = .terminal2
     private let botRight: PaneKind = .browser
 
     @State private var columnSplit: CGFloat = 0.5
@@ -28,16 +31,14 @@ struct WorkspaceView: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    pane(topLeft, w: leftW, h: topH)
-
+                    paneCell(topLeft, w: leftW, h: topH)
                     SplitDivider(axis: .vertical,
                                  onDrag: { dx in
                                      columnSplit = clampSplit(columnSplitBase + dx / totalW)
                                  },
                                  onDragEnded: { columnSplitBase = columnSplit })
                     .frame(height: topH)
-
-                    pane(topRight, w: rightW, h: topH)
+                    paneCell(topRight, w: rightW, h: topH)
                 }
 
                 SplitDivider(axis: .horizontal,
@@ -48,16 +49,14 @@ struct WorkspaceView: View {
                 .frame(width: totalW)
 
                 HStack(spacing: 0) {
-                    pane(botLeft, w: leftW, h: botH)
-
+                    paneCell(botLeft, w: leftW, h: botH)
                     SplitDivider(axis: .vertical,
                                  onDrag: { dx in
                                      columnSplit = clampSplit(columnSplitBase + dx / totalW)
                                  },
                                  onDragEnded: { columnSplitBase = columnSplit })
                     .frame(height: botH)
-
-                    pane(botRight, w: rightW, h: botH)
+                    paneCell(botRight, w: rightW, h: botH)
                 }
             }
             .padding(.horizontal, gutter)
@@ -67,38 +66,25 @@ struct WorkspaceView: View {
     }
 
     @ViewBuilder
-    private func pane(_ kind: PaneKind, w: CGFloat, h: CGFloat) -> some View {
-        PaneView(kind: kind, state: state(for: kind)) {
-            paneBody(for: kind)
+    private func paneCell(_ kind: PaneKind, w: CGFloat, h: CGFloat) -> some View {
+        Group {
+            switch kind {
+            case .terminal, .terminal2:
+                PaneView(kind: kind, state: .running) {
+                    TerminalPaneView()
+                }
+            case .claudeCode:
+                PaneView(kind: kind, state: .running,
+                         actionChip: { ClaudeCodeFolderChip(preferences: preferences) }) {
+                    ClaudeCodePaneView(preferences: preferences)
+                }
+            case .browser:
+                PaneView(kind: kind, state: .running) {
+                    BrowserPaneView()
+                }
+            }
         }
         .frame(width: w, height: h)
-    }
-
-    @ViewBuilder
-    private func paneBody(for kind: PaneKind) -> some View {
-        switch kind {
-        case .terminal:
-            SandboxedPaneBody(kind: kind, state: sandbox.state, containerName: sandbox.containerName) { container in
-                TerminalPaneView(containerName: container)
-            }
-        case .claudeCode:
-            SandboxedPaneBody(kind: kind, state: sandbox.state, containerName: sandbox.containerName) { container in
-                ClaudeCodePaneView(containerName: container)
-            }
-        case .hermesAgent:
-            SandboxedPaneBody(kind: kind, state: sandbox.state, containerName: sandbox.containerName) { container in
-                HermesAgentPaneView(containerName: container)
-            }
-        case .browser:
-            // Browser pane bypasses the sandbox entirely (D6).
-            BrowserPaneView()
-        }
-    }
-
-    private func state(for kind: PaneKind) -> SandboxState {
-        // Browser pane is independent of the cua sandbox per D6.
-        if kind == .browser { return .running }
-        return sandbox.state
     }
 
     private func clampSplit(_ value: CGFloat) -> CGFloat {

@@ -9,14 +9,13 @@ struct ShortcutsSection: View {
     }
 
     private let shortcuts: [Shortcut] = [
-        .init(action: "Open Preferences",     keys: "⌘ ,"),
-        .init(action: "Toggle full-screen",   keys: "⌃ ⌘ F"),
-        .init(action: "Focus Terminal pane",  keys: "⌘ 1"),
-        .init(action: "Focus Claude pane",    keys: "⌘ 2"),
-        .init(action: "Focus Hermes pane",    keys: "⌘ 3"),
-        .init(action: "Focus Browser pane",   keys: "⌘ 4"),
-        .init(action: "Reset sandbox",        keys: "⌃ ⌘ R"),
-        .init(action: "Quit Diakonos",        keys: "⌘ Q")
+        .init(action: "Open Preferences",      keys: "⌘ ,"),
+        .init(action: "Toggle full-screen",    keys: "⌃ ⌘ F"),
+        .init(action: "Focus Terminal pane",   keys: "⌘ 1"),
+        .init(action: "Focus Claude pane",     keys: "⌘ 2"),
+        .init(action: "Focus Terminal 2 pane", keys: "⌘ 3"),
+        .init(action: "Focus Browser pane",    keys: "⌘ 4"),
+        .init(action: "Quit Diakonos",         keys: "⌘ Q")
     ]
 
     var body: some View {

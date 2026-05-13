@@ -40,7 +40,6 @@ struct AgentSection: View {
                                    subtitle: "Stored in macOS Keychain. Never logged or transmitted by Diakonos.") {
                     keyRow("Anthropic",  binding: $preferences.anthropicKey, key: .anthropic)
                     keyRow("OpenAI",     binding: $preferences.openAIKey,    key: .openai)
-                    keyRow("Hermes",     binding: $preferences.hermesKey,    key: .hermes)
                     keyRow("Google AI",  binding: $preferences.googleAIKey,  key: .googleAI)
                 }
             }

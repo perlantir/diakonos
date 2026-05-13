@@ -36,6 +36,8 @@ This is the locked-decisions log. Each decision is ratified by Nick and Claude C
 
 **Implication:** Users must install cua separately before running Diakonos. v1 README documents this; later versions may bundle installation.
 
+**Note (2026-05-13, v1.1):** Partially superseded — D4 now applies only to the Browser pane. The Terminal, Claude Code, and Terminal 2 panes in v1.1 are pure native macOS (no cua, no Docker). See `Docs/v1.1-spec.md` for the architecture pivot.
+
 ---
 
 ## D5 — SwiftTerm for terminal panes

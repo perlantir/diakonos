@@ -1,24 +1,20 @@
 import SwiftUI
 
 struct RootView: View {
-    @State private var agentMode: AgentMode = .manual
-    @StateObject private var sandbox = CUASandboxManager()
+    @EnvironmentObject private var preferences: Preferences
 
     var body: some View {
         VStack(spacing: 0) {
             WorkspaceToolbar(
-                agentMode: $agentMode,
-                sandboxState: sandbox.state,
                 onSettings: openPreferences,
                 onFullscreen: toggleFullscreen
             )
 
             WorkspaceView()
-                .environmentObject(sandbox)
+                .environmentObject(preferences)
         }
         .background(DesignTokens.Palette.bgApp.ignoresSafeArea())
         .frame(minWidth: 1024, minHeight: 640)
-        .onAppear { sandbox.start() }
     }
 
     private func openPreferences() {
@@ -34,9 +30,4 @@ struct RootView: View {
         NSApp.keyWindow?.toggleFullScreen(nil)
         #endif
     }
-}
-
-#Preview {
-    RootView()
-        .frame(width: 1440, height: 900)
 }

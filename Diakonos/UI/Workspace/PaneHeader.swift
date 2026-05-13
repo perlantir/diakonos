@@ -1,10 +1,12 @@
 import SwiftUI
 
-struct PaneHeader: View {
+/// Header bar at the top of every pane. The optional `actionChip` slot lets a
+/// pane mount an interactive label/button — the Claude Code pane uses it to show
+/// the selected project folder.
+struct PaneHeader<ActionChip: View>: View {
     let kind: PaneKind
     let state: SandboxState
-
-    @State private var hoveringMenu = false
+    @ViewBuilder var actionChip: () -> ActionChip
 
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.s2) {
@@ -20,6 +22,8 @@ struct PaneHeader: View {
             Circle()
                 .fill(state.indicatorColor)
                 .frame(width: 6, height: 6)
+
+            actionChip()
 
             Spacer(minLength: 0)
 
@@ -41,5 +45,13 @@ struct PaneHeader: View {
                         .frame(height: 1)
                 }
         )
+    }
+}
+
+extension PaneHeader where ActionChip == EmptyView {
+    init(kind: PaneKind, state: SandboxState) {
+        self.kind = kind
+        self.state = state
+        self.actionChip = { EmptyView() }
     }
 }

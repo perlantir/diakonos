@@ -8,7 +8,7 @@ struct PanesSection: View {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.s5) {
 
                 PreferencesSection(title: "Layout",
-                                   subtitle: "v1 ships with the four hardcoded panes shown below. Custom layouts arrive in v0.2.") {
+                                   subtitle: "v1.1 ships with the four hardcoded panes shown below. Custom layouts arrive in v0.2.") {
                     ForEach(PaneKind.allCases) { kind in
                         PreferenceRow(label: kind.title,
                                       detail: positionLabel(for: kind)) {
@@ -47,10 +47,10 @@ struct PanesSection: View {
 
     private func positionLabel(for kind: PaneKind) -> String {
         switch kind {
-        case .terminal:    return "Top-left"
-        case .claudeCode:  return "Top-right"
-        case .hermesAgent: return "Bottom-left"
-        case .browser:     return "Bottom-right"
+        case .terminal:    return "Top-left · native"
+        case .claudeCode:  return "Top-right · native"
+        case .terminal2:   return "Bottom-left · native"
+        case .browser:     return "Bottom-right · sandboxed Chromium"
         }
     }
 }

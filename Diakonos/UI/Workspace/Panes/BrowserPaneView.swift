@@ -2,54 +2,78 @@ import SwiftUI
 import WebKit
 import AppKit
 
-/// Browser pane: WKWebView with a URL bar (back / forward / address field / reload).
-/// Per D6, v1 uses WKWebView; v0.3 will reconsider sandboxed Chromium video streaming.
+/// Browser pane — sandboxed Chromium streamed via cuabot's Xpra HTML5 client.
+///
+/// v1.1 Approach A:
+///   - `WKWebView` loaded at `http://localhost:10000/` (the cuabot container's
+///     Xpra WebSocket server, confirmed by its `Server: Xpra-WebSocket-Server`
+///     header).
+///   - URL bar drives Chromium *inside* the sandbox via cuabot's `POST /bash`
+///     endpoint (`chromium --no-sandbox <url>` on `DISPLAY=:100`).
+///   - Back / Forward / Reload use xdotool keystroke injection inside the
+///     container (cuabot does not expose dedicated nav primitives).
 struct BrowserPaneView: View {
-    @State private var addressInput: String = "https://www.apple.com"
-    @State private var currentURL: URL? = URL(string: "https://www.apple.com")
-    @StateObject private var bridge = WebViewBridge()
+    @StateObject private var sandbox = BrowserSandbox()
+    @State private var addressInput: String = ""
+    @State private var browserHomeURL: String = "https://duckduckgo.com"
 
     var body: some View {
         VStack(spacing: 0) {
             urlBar
-            BrowserWebView(bridge: bridge)
-                .onAppear {
-                    if let url = currentURL {
-                        bridge.load(url: url)
-                    }
+            content
+        }
+        .onAppear {
+            sandbox.start()
+            // Default home; user can edit via Preferences → Panes → Browser pane.
+            browserHomeURL = UserDefaults.standard.string(forKey: "browserHomeURL") ?? "https://duckduckgo.com"
+            addressInput = browserHomeURL
+            Task { await navigateOnce() }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch sandbox.state {
+        case .running:
+            XpraWebView(url: sandbox.xpraURL)
+        case .initializing, .warning:
+            InitializingPaneBody(kind: .browser,
+                                 message: sandbox.statusMessage.isEmpty ? "Sandbox initializing…" : sandbox.statusMessage)
+        case .error:
+            InitializingPaneBody(kind: .browser,
+                                 message: sandbox.statusMessage)
+                .overlay(alignment: .bottom) {
+                    Text("The Browser pane needs Docker + npx. Other panes work fine without them.")
+                        .font(Typography.text(Typography.Size.xs))
+                        .foregroundStyle(DesignTokens.Palette.textMuted)
+                        .padding(.bottom, DesignTokens.Spacing.s4)
                 }
+        case .stopped:
+            InitializingPaneBody(kind: .browser, message: "Sandbox stopped")
         }
     }
 
     private var urlBar: some View {
         HStack(spacing: DesignTokens.Spacing.s2) {
-            Button { bridge.goBack() } label: {
+            Button { Task { await sandbox.goBack() } } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(
-                        bridge.canGoBack
-                            ? DesignTokens.Palette.textPrimary
-                            : DesignTokens.Palette.textMuted
-                    )
+                    .foregroundStyle(DesignTokens.Palette.textPrimary)
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
-            .disabled(!bridge.canGoBack)
+            .disabled(sandbox.state != .running)
 
-            Button { bridge.goForward() } label: {
+            Button { Task { await sandbox.goForward() } } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(
-                        bridge.canGoForward
-                            ? DesignTokens.Palette.textPrimary
-                            : DesignTokens.Palette.textMuted
-                    )
+                    .foregroundStyle(DesignTokens.Palette.textPrimary)
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
-            .disabled(!bridge.canGoForward)
+            .disabled(sandbox.state != .running)
 
-            TextField("URL", text: $addressInput, onCommit: navigate)
+            TextField("URL or search", text: $addressInput, onCommit: { Task { await navigateOnce() } })
                 .textFieldStyle(.plain)
                 .font(Typography.text(Typography.Size.sm))
                 .padding(.horizontal, DesignTokens.Spacing.s3)
@@ -63,13 +87,20 @@ struct BrowserPaneView: View {
                         )
                 )
 
-            Button { bridge.reload() } label: {
+            Button { Task { await sandbox.reloadCurrent() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DesignTokens.Palette.textPrimary)
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
+            .disabled(sandbox.state != .running)
+
+            // Sandbox state dot (the only place this lives in v1.1).
+            Circle()
+                .fill(sandbox.state.indicatorColor)
+                .frame(width: 6, height: 6)
+                .help(sandbox.statusMessage)
         }
         .padding(.horizontal, DesignTokens.Spacing.s3)
         .padding(.vertical, DesignTokens.Spacing.s2)
@@ -81,68 +112,35 @@ struct BrowserPaneView: View {
         )
     }
 
-    private func navigate() {
-        let trimmed = addressInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let urlString: String
-        if trimmed.contains("://") {
-            urlString = trimmed
-        } else if trimmed.contains(".") && !trimmed.contains(" ") {
-            urlString = "https://\(trimmed)"
-        } else {
-            // Treat as search query.
-            let q = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-            urlString = "https://duckduckgo.com/?q=\(q)"
+    private func navigateOnce() async {
+        // Wait for sandbox.state to flip to .running before sending; called from
+        // multiple entry points so a no-op early-return is fine.
+        var attempts = 0
+        while sandbox.state != .running, attempts < 90 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            attempts += 1
         }
-        guard let url = URL(string: urlString) else { return }
-        currentURL = url
-        bridge.load(url: url)
+        await sandbox.navigate(to: addressInput)
     }
 }
 
-@MainActor
-final class WebViewBridge: NSObject, ObservableObject, WKNavigationDelegate {
-    @Published var canGoBack = false
-    @Published var canGoForward = false
-
-    weak var webView: WKWebView?
-
-    func load(url: URL) {
-        webView?.load(URLRequest(url: url))
-    }
-
-    func goBack()   { webView?.goBack();    refreshNav() }
-    func goForward(){ webView?.goForward(); refreshNav() }
-    func reload()   { webView?.reload() }
-
-    func attach(_ view: WKWebView) {
-        webView = view
-        view.navigationDelegate = self
-        refreshNav()
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        refreshNav()
-    }
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        refreshNav()
-    }
-
-    private func refreshNav() {
-        canGoBack = webView?.canGoBack ?? false
-        canGoForward = webView?.canGoForward ?? false
-    }
-}
-
-struct BrowserWebView: NSViewRepresentable {
-    @ObservedObject var bridge: WebViewBridge
+/// Embeds the Xpra HTML5 client in a WKWebView. The web client owns its own
+/// keyboard/mouse forwarding; we just provide the viewport.
+struct XpraWebView: NSViewRepresentable {
+    let url: URL
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        // Allow autoplay of media (Xpra streams may use HTML5 audio).
+        config.mediaTypesRequiringUserActionForPlayback = []
         let view = WKWebView(frame: .zero, configuration: config)
-        bridge.attach(view)
+        view.load(URLRequest(url: url))
         return view
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) { }
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if nsView.url != url {
+            nsView.load(URLRequest(url: url))
+        }
+    }
 }

@@ -13,19 +13,13 @@ final class Preferences: ObservableObject {
     }
 
     @AppStorage("appearance") private var appearanceRaw: String = Appearance.system.rawValue
-    @AppStorage("autoStartSandbox") var autoStartSandbox: Bool = true
-    @AppStorage("autoUpdateSandbox") var autoUpdateSandbox: Bool = false
-    @AppStorage("sandboxCPU") var sandboxCPULimit: Double = 4
-    @AppStorage("sandboxMemoryGB") var sandboxMemoryGB: Double = 4
     @AppStorage("preferredModel") var preferredModel: String = "claude-opus-4-7"
     @AppStorage("agentTemperature") var agentTemperature: Double = 0.7
-    @AppStorage("agentDefaultMode") var agentDefaultModeRaw: String = AgentMode.manual.rawValue
-    @AppStorage("browserHomeURL") var browserHomeURL: String = "https://www.apple.com"
-    @AppStorage("paneAssignments") var paneAssignmentsRaw: String = "terminal,claudeCode,hermesAgent,browser"
+    @AppStorage("browserHomeURL") var browserHomeURL: String = "https://duckduckgo.com"
+    @AppStorage("claudeCodeFolderPath") var claudeCodeFolderPath: String = ""
 
     @Published var anthropicKey: String = KeychainStore.read(.anthropic) ?? ""
     @Published var openAIKey: String = KeychainStore.read(.openai) ?? ""
-    @Published var hermesKey: String = KeychainStore.read(.hermes) ?? ""
     @Published var googleAIKey: String = KeychainStore.read(.googleAI) ?? ""
 
     var appearance: Appearance {
@@ -33,9 +27,11 @@ final class Preferences: ObservableObject {
         set { appearanceRaw = newValue.rawValue }
     }
 
-    var agentDefaultMode: AgentMode {
-        get { AgentMode(rawValue: agentDefaultModeRaw) ?? .manual }
-        set { agentDefaultModeRaw = newValue.rawValue }
+    /// Resolved cwd for the Claude Code pane. Empty preference = $HOME default.
+    var claudeCodeResolvedCwd: String {
+        let trimmed = claudeCodeFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return NSHomeDirectory() }
+        return (trimmed as NSString).expandingTildeInPath
     }
 
     func persistAPIKey(_ key: KeychainStore.Key, value: String) {

@@ -8,7 +8,6 @@ enum KeychainStore {
     enum Key: String, CaseIterable {
         case anthropic   = "api.anthropic"
         case openai      = "api.openai"
-        case hermes      = "api.hermes"
         case googleAI    = "api.googleAI"
     }
 

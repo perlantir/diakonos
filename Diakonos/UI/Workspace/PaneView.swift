@@ -1,13 +1,14 @@
 import SwiftUI
 
-struct PaneView<Body: View>: View {
+struct PaneView<Body: View, ActionChip: View>: View {
     let kind: PaneKind
     let state: SandboxState
-    @ViewBuilder let content: () -> Body
+    @ViewBuilder var actionChip: () -> ActionChip
+    @ViewBuilder var content: () -> Body
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(kind: kind, state: state)
+            PaneHeader(kind: kind, state: state, actionChip: actionChip)
             content()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -21,9 +22,19 @@ struct PaneView<Body: View>: View {
     }
 }
 
-/// Placeholder body used by Phase 1 — pane is "initializing" with icon + title.
+extension PaneView where ActionChip == EmptyView {
+    init(kind: PaneKind, state: SandboxState, @ViewBuilder content: @escaping () -> Body) {
+        self.kind = kind
+        self.state = state
+        self.actionChip = { EmptyView() }
+        self.content = content
+    }
+}
+
+/// Placeholder body. v1.1 only the Browser pane uses this (while its sandbox boots).
 struct InitializingPaneBody: View {
     let kind: PaneKind
+    var message: String = "Sandbox is initializing…"
 
     var body: some View {
         VStack(spacing: DesignTokens.Spacing.s4) {
@@ -40,9 +51,11 @@ struct InitializingPaneBody: View {
                 Text(kind.title)
                     .font(Typography.text(Typography.Size.lg, weight: .semibold))
                     .foregroundStyle(DesignTokens.Palette.textPrimary)
-                Text("Sandbox is initializing…")
+                Text(message)
                     .font(Typography.text(Typography.Size.sm))
                     .foregroundStyle(DesignTokens.Palette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 280)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

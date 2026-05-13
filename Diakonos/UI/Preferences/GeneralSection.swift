@@ -24,27 +24,10 @@ struct GeneralSection: View {
                     }
                 }
 
-                PreferencesSection(title: "Startup") {
-                    PreferenceRow(label: "Auto-start sandbox on launch",
-                                  detail: "Boots the cua sandbox when Diakonos opens.") {
-                        Toggle("", isOn: $preferences.autoStartSandbox).labelsHidden()
-                    }
-                    PreferenceRow(label: "Default agent mode") {
-                        Picker("", selection: Binding(
-                            get: { preferences.agentDefaultMode },
-                            set: { preferences.agentDefaultMode = $0 }
-                        )) {
-                            ForEach(AgentMode.allCases) { Text($0.label).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 240)
-                    }
-                }
-
                 PreferencesSection(title: "Updates",
-                                   subtitle: "Diakonos v1 is a developer build. Auto-update arrives in v0.5+.") {
+                                   subtitle: "Diakonos v1.1 is a developer build. Auto-update arrives in v0.5+.") {
                     PreferenceRow(label: "Diakonos version") {
-                        Text("0.1.0").font(Typography.mono(Typography.Size.sm))
+                        Text("0.1.1").font(Typography.mono(Typography.Size.sm))
                             .foregroundStyle(DesignTokens.Palette.textSecondary)
                     }
                 }
