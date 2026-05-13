@@ -1,16 +1,43 @@
 import SwiftUI
 
-struct PaneView<Body: View, ActionChip: View>: View {
-    let kind: PaneKind
+/// Generic pane wrapper. Bodies render only when `viewState == .normal`;
+/// when minimized, only the header is visible. Maximize is handled at the
+/// WorkspaceView level — a single slot gets full-bleed, others are hidden.
+struct PaneView<Body: View, ActionChip: View, MenuContent: View>: View {
+    let title: String
+    let iconSystemName: String
+    let accent: Color
     let state: SandboxState
+    let viewState: PaneSlotViewState
+    let isMaximized: Bool
+
+    var onMinimize: () -> Void = {}
+    var onMaximizeToggle: () -> Void = {}
+    var onClose: () -> Void = {}
+    @ViewBuilder var menuContent: () -> MenuContent
     @ViewBuilder var actionChip: () -> ActionChip
     @ViewBuilder var content: () -> Body
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneHeader(kind: kind, state: state, actionChip: actionChip)
-            content()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PaneHeader(
+                title: title,
+                iconSystemName: iconSystemName,
+                accent: accent,
+                state: state,
+                viewState: viewState,
+                isMaximized: isMaximized,
+                onMinimize: onMinimize,
+                onMaximizeToggle: onMaximizeToggle,
+                onClose: onClose,
+                menuContent: menuContent,
+                actionChip: actionChip
+            )
+
+            if viewState != .minimized {
+                content()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .background(DesignTokens.Palette.bgSurface)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous))
@@ -22,33 +49,26 @@ struct PaneView<Body: View, ActionChip: View>: View {
     }
 }
 
-extension PaneView where ActionChip == EmptyView {
-    init(kind: PaneKind, state: SandboxState, @ViewBuilder content: @escaping () -> Body) {
-        self.kind = kind
-        self.state = state
-        self.actionChip = { EmptyView() }
-        self.content = content
-    }
-}
-
-/// Placeholder body. v1.1 only the Browser pane uses this (while its sandbox boots).
+/// Initializing placeholder body. Only used by the Browser pane while cua boots.
 struct InitializingPaneBody: View {
-    let kind: PaneKind
+    let iconSystemName: String
+    let accent: Color
+    let title: String
     var message: String = "Sandbox is initializing…"
 
     var body: some View {
         VStack(spacing: DesignTokens.Spacing.s4) {
             ZStack {
                 Circle()
-                    .fill(kind.accent.opacity(0.12))
+                    .fill(accent.opacity(0.12))
                     .frame(width: 64, height: 64)
-                Image(systemName: kind.iconSystemName)
+                Image(systemName: iconSystemName)
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(kind.accent)
+                    .foregroundStyle(accent)
             }
 
             VStack(spacing: DesignTokens.Spacing.s1) {
-                Text(kind.title)
+                Text(title)
                     .font(Typography.text(Typography.Size.lg, weight: .semibold))
                     .foregroundStyle(DesignTokens.Palette.textPrimary)
                 Text(message)

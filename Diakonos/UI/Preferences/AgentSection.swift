@@ -15,7 +15,10 @@ struct AgentSection: View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.s5) {
 
-                PreferencesSection(title: "Model") {
+                PreferencesSection(
+                    title: "Model",
+                    subtitle: "Passed to Claude Code as ANTHROPIC_MODEL on pane spawn."
+                ) {
                     PreferenceRow(label: "Preferred model") {
                         Picker("", selection: $preferences.preferredModel) {
                             ForEach(models, id: \.self) { Text($0).tag($0) }
@@ -23,24 +26,15 @@ struct AgentSection: View {
                         .pickerStyle(.menu)
                         .frame(width: 240)
                     }
-                    PreferenceRow(label: "Temperature",
-                                  detail: "Higher = more exploratory; lower = more deterministic.") {
-                        HStack(spacing: DesignTokens.Spacing.s3) {
-                            Slider(value: $preferences.agentTemperature, in: 0...1, step: 0.05)
-                                .frame(width: 220)
-                            Text(String(format: "%.2f", preferences.agentTemperature))
-                                .font(Typography.mono(Typography.Size.sm))
-                                .foregroundStyle(DesignTokens.Palette.textSecondary)
-                                .frame(width: 40, alignment: .trailing)
-                        }
-                    }
                 }
 
-                PreferencesSection(title: "API keys",
-                                   subtitle: "Stored in macOS Keychain. Never logged or transmitted by Diakonos.") {
-                    keyRow("Anthropic",  binding: $preferences.anthropicKey, key: .anthropic)
-                    keyRow("OpenAI",     binding: $preferences.openAIKey,    key: .openai)
-                    keyRow("Google AI",  binding: $preferences.googleAIKey,  key: .googleAI)
+                PreferencesSection(
+                    title: "API keys",
+                    subtitle: "Stored in macOS Keychain. Injected as ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY into pane processes on spawn."
+                ) {
+                    keyRow("Anthropic", binding: $preferences.anthropicKey, key: .anthropic)
+                    keyRow("OpenAI",    binding: $preferences.openAIKey,    key: .openai)
+                    keyRow("Google AI", binding: $preferences.googleAIKey,  key: .googleAI)
                 }
             }
             .padding(DesignTokens.Spacing.s5)

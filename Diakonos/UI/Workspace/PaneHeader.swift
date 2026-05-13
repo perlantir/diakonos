@@ -1,23 +1,33 @@
 import SwiftUI
 
-/// Header bar at the top of every pane. The optional `actionChip` slot lets a
-/// pane mount an interactive label/button — the Claude Code pane uses it to show
-/// the selected project folder.
-struct PaneHeader<ActionChip: View>: View {
-    let kind: PaneKind
+/// Header bar at the top of every pane. v1.2 wiring:
+///   - left: pane icon + title + state dot + optional `actionChip`
+///   - right: 3-dot menu (kind-specific items), minimize, maximize/restore, close
+struct PaneHeader<ActionChip: View, MenuContent: View>: View {
+    let title: String
+    let iconSystemName: String
+    let accent: Color
     let state: SandboxState
+    let viewState: PaneSlotViewState
+    let isMaximized: Bool
+
+    var onMinimize: () -> Void = {}
+    var onMaximizeToggle: () -> Void = {}
+    var onClose: () -> Void = {}
+    @ViewBuilder var menuContent: () -> MenuContent
     @ViewBuilder var actionChip: () -> ActionChip
 
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.s2) {
-            Image(systemName: kind.iconSystemName)
+            Image(systemName: iconSystemName)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(kind.accent)
+                .foregroundStyle(accent)
                 .frame(width: 18, height: 18)
 
-            Text(kind.title)
+            Text(title)
                 .font(Typography.text(Typography.Size.sm, weight: .semibold))
                 .foregroundStyle(DesignTokens.Palette.textPrimary)
+                .lineLimit(1)
 
             Circle()
                 .fill(state.indicatorColor)
@@ -28,10 +38,30 @@ struct PaneHeader<ActionChip: View>: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 2) {
-                IconButton(systemImage: "ellipsis", size: 22, iconSize: 12)
-                IconButton(systemImage: "minus", size: 22, iconSize: 11)
-                IconButton(systemImage: "arrow.up.left.and.arrow.down.right", size: 22, iconSize: 10)
-                IconButton(systemImage: "xmark", size: 22, iconSize: 10)
+                Menu {
+                    menuContent()
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DesignTokens.Palette.textSecondary)
+                        .frame(width: 22, height: 22)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
+                IconButton(systemImage: viewState == .minimized ? "plus" : "minus",
+                           size: 22, iconSize: 11,
+                           action: onMinimize)
+
+                IconButton(systemImage: isMaximized
+                                ? "arrow.down.right.and.arrow.up.left"
+                                : "arrow.up.left.and.arrow.down.right",
+                           size: 22, iconSize: 10,
+                           action: onMaximizeToggle)
+
+                IconButton(systemImage: "xmark", size: 22, iconSize: 10,
+                           action: onClose)
             }
         }
         .padding(.horizontal, DesignTokens.Spacing.s3)
@@ -49,9 +79,50 @@ struct PaneHeader<ActionChip: View>: View {
 }
 
 extension PaneHeader where ActionChip == EmptyView {
-    init(kind: PaneKind, state: SandboxState) {
-        self.kind = kind
+    init(title: String,
+         iconSystemName: String,
+         accent: Color,
+         state: SandboxState,
+         viewState: PaneSlotViewState,
+         isMaximized: Bool,
+         onMinimize: @escaping () -> Void = {},
+         onMaximizeToggle: @escaping () -> Void = {},
+         onClose: @escaping () -> Void = {},
+         @ViewBuilder menuContent: @escaping () -> MenuContent) {
+        self.title = title
+        self.iconSystemName = iconSystemName
+        self.accent = accent
         self.state = state
+        self.viewState = viewState
+        self.isMaximized = isMaximized
+        self.onMinimize = onMinimize
+        self.onMaximizeToggle = onMaximizeToggle
+        self.onClose = onClose
+        self.menuContent = menuContent
+        self.actionChip = { EmptyView() }
+    }
+}
+
+extension PaneHeader where MenuContent == EmptyView, ActionChip == EmptyView {
+    init(title: String,
+         iconSystemName: String,
+         accent: Color,
+         state: SandboxState,
+         viewState: PaneSlotViewState,
+         isMaximized: Bool,
+         onMinimize: @escaping () -> Void = {},
+         onMaximizeToggle: @escaping () -> Void = {},
+         onClose: @escaping () -> Void = {}) {
+        self.title = title
+        self.iconSystemName = iconSystemName
+        self.accent = accent
+        self.state = state
+        self.viewState = viewState
+        self.isMaximized = isMaximized
+        self.onMinimize = onMinimize
+        self.onMaximizeToggle = onMaximizeToggle
+        self.onClose = onClose
+        self.menuContent = { EmptyView() }
         self.actionChip = { EmptyView() }
     }
 }

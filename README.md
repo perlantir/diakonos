@@ -12,19 +12,29 @@ Open source, MIT.
 
 ## Status
 
-v1.1 in active development. Not yet released.
+v1.2 in active development. Not yet released.
 
-## What's in v1.1
+## What's in v1.2
 
 - Single window with a 2x2 grid of resizable panes
-- Top-left: native macOS terminal (`$SHELL -l` in `$HOME`)
-- Top-right: Claude Code running `claude --dangerously-skip-permissions` in
-  a user-pickable project folder (folder persists across launches)
-- Bottom-left: second native macOS terminal
-- Bottom-right: sandboxed Chromium browser (streamed from cua's Docker
-  container via Xpra HTML5)
-- Preferences (General · Panes · Agent · Shortcuts · About), API keys in
-  Keychain, light + dark mode
+- **Each slot is reassignable** — Close pops the screen-07 empty
+  placeholder with a dropdown to pick Terminal / Claude Code / Browser
+- Default layout: top-left Terminal, top-right Claude Code, bottom-left
+  Terminal 2, bottom-right Browser. User changes persist via UserDefaults.
+- **Cmd+1..4** focus the four pane positions
+- Pane header buttons all work: minimize collapses, maximize fills,
+  close swaps to empty, 3-dot menu has kind-specific actions
+- Native terminals: `$SHELL -l` in `$HOME` on the real Mac
+- Claude Code: `claude --dangerously-skip-permissions` in a
+  user-pickable project folder (folder persists across launches);
+  auto-accepts the trust prompt on spawn
+- Browser: sandboxed Chromium streamed via a **screenshot-stream
+  protocol** (10 fps from cuabot, mouse + keyboard forwarded through
+  cuabot's HTTP API). URL bar shows what Chromium actually displays
+  (via CDP); URLs reuse the current tab instead of stacking.
+- Preferences: API keys in Keychain auto-injected into pane env
+  (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY); model picker
+  drives `ANTHROPIC_MODEL`; theme picker actually swaps light/dark.
 - macOS 14.0+ (Sonoma)
 
 ## What's not in v1.1

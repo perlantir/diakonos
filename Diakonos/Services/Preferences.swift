@@ -14,7 +14,6 @@ final class Preferences: ObservableObject {
 
     @AppStorage("appearance") private var appearanceRaw: String = Appearance.system.rawValue
     @AppStorage("preferredModel") var preferredModel: String = "claude-opus-4-7"
-    @AppStorage("agentTemperature") var agentTemperature: Double = 0.7
     @AppStorage("browserHomeURL") var browserHomeURL: String = "https://duckduckgo.com"
     @AppStorage("claudeCodeFolderPath") var claudeCodeFolderPath: String = ""
 

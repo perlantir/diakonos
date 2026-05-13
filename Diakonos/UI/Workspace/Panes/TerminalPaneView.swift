@@ -4,7 +4,7 @@ import SwiftTerm
 
 /// Native macOS terminal pane. Spawns the user's `$SHELL` (or `/bin/zsh` fallback)
 /// in `$HOME` via SwiftTerm's `LocalProcessTerminalView`. Real PTY, real $PATH,
-/// real filesystem — v1.1 dropped the docker-exec-into-sandbox indirection.
+/// real filesystem.
 ///
 /// Focus isolation: each instance is its own `LocalProcessTerminalView` (an NSView)
 /// surfaced directly as the representable's NSView. No wrapper. SwiftTerm handles
@@ -14,9 +14,18 @@ struct TerminalPaneView: NSViewRepresentable {
     var workingDirectory: String? = nil
     /// Optional explicit shell command override. If nil, runs `$SHELL -l`.
     var commandOverride: TerminalCommand? = nil
-    /// Identifier for state-comparison in `updateNSView` so we only respawn when
-    /// the inputs actually change (e.g. when the Claude pane's folder changes).
+    /// Identifier for state-comparison in `updateNSView` so we only respawn
+    /// when the inputs actually change.
     var spawnIdentity: String = ""
+    /// `KEY=VALUE` strings injected into the child process environment.
+    /// nil means "inherit parent env unchanged" (SwiftTerm's default).
+    var additionalEnvironment: [String]? = nil
+    /// Optional position used to register this view in PaneFocusRegistry
+    /// so Cmd+1..4 can focus it.
+    var focusPosition: PaneSlotPosition? = nil
+    /// Closure invoked once the process has been spawned. Used by the Claude
+    /// Code pane to send the auto-trust keystrokes.
+    var onSpawn: (LocalProcessTerminalView) -> Void = { _ in }
 
     var onTitleChange: (String) -> Void = { _ in }
 
@@ -35,15 +44,27 @@ struct TerminalPaneView: NSViewRepresentable {
                                              alpha: 1.0)
         term.nativeForegroundColor = NSColor(white: 0.95, alpha: 1.0)
 
+        if let pos = focusPosition {
+            PaneFocusRegistry.shared.register(term, at: pos)
+        }
+
         spawn(into: term, coordinator: context.coordinator)
         return term
     }
 
     func updateNSView(_ term: LocalProcessTerminalView, context: Context) {
+        if let pos = focusPosition {
+            PaneFocusRegistry.shared.register(term, at: pos)
+        }
+
         let key = spawnKey()
         guard context.coordinator.lastSpawnKey != key else { return }
         term.terminate()
         spawn(into: term, coordinator: context.coordinator)
+    }
+
+    static func dismantleNSView(_ term: LocalProcessTerminalView, coordinator: Coordinator) {
+        term.terminate()
     }
 
     private func spawnKey() -> String {
@@ -64,7 +85,6 @@ struct TerminalPaneView: NSViewRepresentable {
             execName = override.execName
         } else {
             executable = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-            // Login shell so $PATH and friends populate via the user's shell rc files.
             args = ["-l"]
             execName = nil
         }
@@ -72,11 +92,12 @@ struct TerminalPaneView: NSViewRepresentable {
         term.startProcess(
             executable: executable,
             args: args,
-            environment: nil,
+            environment: additionalEnvironment,
             execName: execName,
             currentDirectory: cwd
         )
         coordinator.lastSpawnKey = spawnKey()
+        onSpawn(term)
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
@@ -96,8 +117,8 @@ struct TerminalPaneView: NSViewRepresentable {
     }
 }
 
-/// A custom executable + args + execName triple used when a pane wants to launch
-/// something other than `$SHELL -l`. Used by the Claude Code pane.
+/// A custom executable + args + execName triple used when a pane wants to
+/// launch something other than `$SHELL -l`. Used by the Claude Code pane.
 struct TerminalCommand: Equatable {
     var executable: String
     var args: [String]

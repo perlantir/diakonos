@@ -1,21 +1,28 @@
 import SwiftUI
-import WebKit
 import AppKit
 
-/// Browser pane — sandboxed Chromium streamed via cuabot's Xpra HTML5 client.
+/// Browser pane — sandboxed Chromium via Option Z (screenshot stream + click /
+/// keyboard forwarding through cuabot's HTTP API).
 ///
-/// v1.1 Approach A:
-///   - `WKWebView` loaded at `http://localhost:10000/` (the cuabot container's
-///     Xpra WebSocket server, confirmed by its `Server: Xpra-WebSocket-Server`
-///     header).
-///   - URL bar drives Chromium *inside* the sandbox via cuabot's `POST /bash`
-///     endpoint (`chromium --no-sandbox <url>` on `DISPLAY=:100`).
-///   - Back / Forward / Reload use xdotool keystroke injection inside the
-///     container (cuabot does not expose dedicated nav primitives).
+/// Architecture:
+///   - `SandboxStream` polls `POST /screenshot` at 10 fps and publishes the
+///     latest JPEG as NSImage + native dimensions + scale factor.
+///   - `SandboxScreenNSView` (AppKit) renders the image, captures mouse +
+///     keyboard, and forwards to `SandboxInput`.
+///   - `BrowserSandbox` (carried over from v1.1) owns cuabot lifecycle +
+///     navigation (launch chromium with the URL).
+///   - 3-dot menu actions arrive via Notification (Reload / Pop-out / Reset).
 struct BrowserPaneView: View {
+    var focusPosition: PaneSlotPosition? = nil
+
+    @EnvironmentObject private var preferences: Preferences
     @StateObject private var sandbox = BrowserSandbox()
+    @StateObject private var stream = SandboxStream()
+    @StateObject private var input = SandboxInput()
+
     @State private var addressInput: String = ""
-    @State private var browserHomeURL: String = "https://duckduckgo.com"
+    @State private var displayedURL: String = ""
+    @State private var hasFocus = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,32 +31,71 @@ struct BrowserPaneView: View {
         }
         .onAppear {
             sandbox.start()
-            // Default home; user can edit via Preferences → Panes → Browser pane.
-            browserHomeURL = UserDefaults.standard.string(forKey: "browserHomeURL") ?? "https://duckduckgo.com"
-            addressInput = browserHomeURL
-            Task { await navigateOnce() }
+            addressInput = preferences.browserHomeURL
+            Task { await loadInitial() }
+        }
+        .onDisappear {
+            stream.stop()
+        }
+        .onChange(of: sandbox.state) { _, new in
+            if new == .running { stream.start() }
+            else { stream.stop() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserReload)) { _ in
+            Task { await sandbox.reloadCurrent() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserResetSandbox)) { _ in
+            Task { await sandbox.resetSandbox() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserPopout)) { _ in
+            Task { await sandbox.openFloatingChromiumWindow() }
         }
     }
 
     @ViewBuilder
     private var content: some View {
         switch sandbox.state {
+        case .running where stream.latestImage != nil:
+            SandboxScreenView(
+                stream: stream,
+                input: input,
+                focused: $hasFocus,
+                focusPosition: focusPosition
+            )
         case .running:
-            XpraWebView(url: sandbox.xpraURL)
+            InitializingPaneBody(
+                iconSystemName: "globe",
+                accent: DesignTokens.Palette.accentPrimary,
+                title: "Browser",
+                message: "Waiting for the first sandbox frame…"
+            )
         case .initializing, .warning:
-            InitializingPaneBody(kind: .browser,
-                                 message: sandbox.statusMessage.isEmpty ? "Sandbox initializing…" : sandbox.statusMessage)
+            InitializingPaneBody(
+                iconSystemName: "globe",
+                accent: DesignTokens.Palette.accentPrimary,
+                title: "Browser",
+                message: sandbox.statusMessage.isEmpty ? "Sandbox initializing…" : sandbox.statusMessage
+            )
         case .error:
-            InitializingPaneBody(kind: .browser,
-                                 message: sandbox.statusMessage)
-                .overlay(alignment: .bottom) {
-                    Text("The Browser pane needs Docker + npx. Other panes work fine without them.")
-                        .font(Typography.text(Typography.Size.xs))
-                        .foregroundStyle(DesignTokens.Palette.textMuted)
-                        .padding(.bottom, DesignTokens.Spacing.s4)
-                }
+            InitializingPaneBody(
+                iconSystemName: "globe",
+                accent: DesignTokens.Palette.accentPrimary,
+                title: "Browser",
+                message: sandbox.statusMessage
+            )
+            .overlay(alignment: .bottom) {
+                Text("The Browser pane needs Docker + npx. Other panes work fine without them.")
+                    .font(Typography.text(Typography.Size.xs))
+                    .foregroundStyle(DesignTokens.Palette.textMuted)
+                    .padding(.bottom, DesignTokens.Spacing.s4)
+            }
         case .stopped:
-            InitializingPaneBody(kind: .browser, message: "Sandbox stopped")
+            InitializingPaneBody(
+                iconSystemName: "globe",
+                accent: DesignTokens.Palette.accentPrimary,
+                title: "Browser",
+                message: "Sandbox stopped"
+            )
         }
     }
 
@@ -73,7 +119,12 @@ struct BrowserPaneView: View {
             .buttonStyle(.plain)
             .disabled(sandbox.state != .running)
 
-            TextField("URL or search", text: $addressInput, onCommit: { Task { await navigateOnce() } })
+            TextField("URL or search",
+                      text: Binding(
+                        get: { displayedURL.isEmpty ? addressInput : displayedURL },
+                        set: { addressInput = $0; displayedURL = "" }
+                      ),
+                      onCommit: { Task { await navigate() } })
                 .textFieldStyle(.plain)
                 .font(Typography.text(Typography.Size.sm))
                 .padding(.horizontal, DesignTokens.Spacing.s3)
@@ -96,7 +147,6 @@ struct BrowserPaneView: View {
             .buttonStyle(.plain)
             .disabled(sandbox.state != .running)
 
-            // Sandbox state dot (the only place this lives in v1.1).
             Circle()
                 .fill(sandbox.state.indicatorColor)
                 .frame(width: 6, height: 6)
@@ -110,37 +160,247 @@ struct BrowserPaneView: View {
                     Rectangle().fill(DesignTokens.Palette.borderSoft).frame(height: 1)
                 }
         )
+        .task(id: sandbox.state) {
+            guard sandbox.state == .running else { return }
+            while !Task.isCancelled, sandbox.state == .running {
+                let live = await sandbox.fetchCurrentURL()
+                if let live, !live.isEmpty {
+                    displayedURL = live
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
     }
 
-    private func navigateOnce() async {
-        // Wait for sandbox.state to flip to .running before sending; called from
-        // multiple entry points so a no-op early-return is fine.
+    private func navigate() async {
+        let urlText = addressInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !urlText.isEmpty else { return }
+        await sandbox.navigate(to: urlText)
+        displayedURL = ""
+    }
+
+    private func loadInitial() async {
         var attempts = 0
         while sandbox.state != .running, attempts < 90 {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             attempts += 1
         }
+        guard sandbox.state == .running else { return }
         await sandbox.navigate(to: addressInput)
     }
 }
 
-/// Embeds the Xpra HTML5 client in a WKWebView. The web client owns its own
-/// keyboard/mouse forwarding; we just provide the viewport.
-struct XpraWebView: NSViewRepresentable {
-    let url: URL
+/// AppKit hosting view for the screenshot stream. Captures mouse + keyboard
+/// and forwards to `SandboxInput`.
+struct SandboxScreenView: NSViewRepresentable {
+    @ObservedObject var stream: SandboxStream
+    @ObservedObject var input: SandboxInput
+    @Binding var focused: Bool
+    var focusPosition: PaneSlotPosition?
 
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        // Allow autoplay of media (Xpra streams may use HTML5 audio).
-        config.mediaTypesRequiringUserActionForPlayback = []
-        let view = WKWebView(frame: .zero, configuration: config)
-        view.load(URLRequest(url: url))
+    func makeCoordinator() -> Coordinator {
+        Coordinator(stream: stream, input: input, focused: $focused)
+    }
+
+    func makeNSView(context: Context) -> SandboxScreenNSView {
+        let view = SandboxScreenNSView()
+        view.coordinator = context.coordinator
+        if let pos = focusPosition {
+            PaneFocusRegistry.shared.register(view, at: pos)
+        }
         return view
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        if nsView.url != url {
-            nsView.load(URLRequest(url: url))
+    func updateNSView(_ nsView: SandboxScreenNSView, context: Context) {
+        if let pos = focusPosition {
+            PaneFocusRegistry.shared.register(nsView, at: pos)
         }
+        nsView.imageBoxNeedsRedraw(stream.latestImage)
+    }
+
+    final class Coordinator {
+        let stream: SandboxStream
+        let input: SandboxInput
+        @Binding var focused: Bool
+
+        init(stream: SandboxStream, input: SandboxInput, focused: Binding<Bool>) {
+            self.stream = stream
+            self.input = input
+            self._focused = focused
+        }
+    }
+}
+
+/// Pure AppKit view that paints the latest screenshot, captures mouse events
+/// inside its bounds, and forwards keyboard while it's first responder.
+final class SandboxScreenNSView: NSView {
+    var coordinator: SandboxScreenView.Coordinator?
+    private var currentImage: NSImage?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    required init?(coder: NSCoder) { super.init(coder: coder); wantsLayer = true; layer?.backgroundColor = NSColor.black.cgColor }
+
+    override var acceptsFirstResponder: Bool { true }
+    override func becomeFirstResponder() -> Bool { focusChanged(true); return super.becomeFirstResponder() }
+    override func resignFirstResponder() -> Bool { focusChanged(false); return super.resignFirstResponder() }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private func focusChanged(_ value: Bool) {
+        DispatchQueue.main.async { [weak self] in self?.coordinator?.focused = value }
+        needsDisplay = true
+    }
+
+    func imageBoxNeedsRedraw(_ image: NSImage?) {
+        currentImage = image
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.setFill()
+        bounds.fill()
+        if let img = currentImage {
+            let target = aspectFitRect(forImage: img.size, in: bounds)
+            img.draw(in: target,
+                     from: .zero,
+                     operation: .copy,
+                     fraction: 1.0,
+                     respectFlipped: true,
+                     hints: [.interpolation: NSImageInterpolation.medium])
+        }
+        if coordinator?.focused == true {
+            NSColor(srgbRed: 47/255, green: 107/255, blue: 1.0, alpha: 1.0).setStroke()
+            let path = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    private func aspectFitRect(forImage size: CGSize, in container: CGRect) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return container }
+        let scale = min(container.width / size.width, container.height / size.height)
+        let w = size.width * scale
+        let h = size.height * scale
+        let x = container.minX + (container.width - w) / 2
+        let y = container.minY + (container.height - h) / 2
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    private func localToImageRect() -> CGRect? {
+        guard let img = currentImage, img.size.width > 0, img.size.height > 0 else { return nil }
+        return aspectFitRect(forImage: img.size, in: bounds)
+    }
+
+    /// Translate a click in our local coords into local-image coords,
+    /// flipping Y because AppKit's mouse Y origin is bottom-left.
+    private func translate(_ point: CGPoint) -> (CGPoint, CGSize)? {
+        guard let imgRect = localToImageRect() else { return nil }
+        guard imgRect.contains(point) else { return nil }
+        let lp = CGPoint(x: point.x - imgRect.minX,
+                         y: imgRect.height - (point.y - imgRect.minY)) // flip Y
+        return (lp, imgRect.size)
+    }
+
+    // MARK: - Mouse forwarding
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        guard let coordinator = coordinator else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        guard let (lp, size) = translate(local) else { return }
+        Task { @MainActor in
+            await coordinator.input.click(
+                at: lp,
+                localSize: size,
+                nativeSize: coordinator.stream.nativeSize,
+                scale: coordinator.stream.coordScale
+            )
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let coordinator = coordinator else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        guard let (lp, size) = translate(local) else { return }
+        Task { @MainActor in
+            await coordinator.input.click(
+                at: lp,
+                localSize: size,
+                nativeSize: coordinator.stream.nativeSize,
+                scale: coordinator.stream.coordScale,
+                button: "right"
+            )
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let coordinator = coordinator else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        guard let (lp, size) = translate(local) else { return }
+        let dx = -event.scrollingDeltaX
+        let dy = -event.scrollingDeltaY
+        Task { @MainActor in
+            await coordinator.input.scroll(
+                at: lp, localSize: size,
+                nativeSize: coordinator.stream.nativeSize,
+                scale: coordinator.stream.coordScale,
+                dx: dx, dy: dy
+            )
+        }
+    }
+
+    // MARK: - Keyboard forwarding
+
+    override func keyDown(with event: NSEvent) {
+        guard let coordinator = coordinator else { return super.keyDown(with: event) }
+        if let (keyName, mods) = Self.specialKey(for: event) {
+            Task { @MainActor in await coordinator.input.key(keyName, modifiers: mods) }
+            return
+        }
+        let chars = event.characters ?? ""
+        if !chars.isEmpty {
+            Task { @MainActor in await coordinator.input.type(chars) }
+        }
+    }
+
+    /// Maps macOS key events to xdotool key names. Returns nil for plain
+    /// printable characters (those go through /type).
+    private static func specialKey(for event: NSEvent) -> (String, [String])? {
+        var modifiers: [String] = []
+        let f = event.modifierFlags
+        if f.contains(.command) { modifiers.append("super") }
+        if f.contains(.option)  { modifiers.append("alt") }
+        if f.contains(.control) { modifiers.append("ctrl") }
+        if f.contains(.shift)   { modifiers.append("shift") }
+
+        let key: String?
+        switch Int(event.keyCode) {
+        case 36: key = "Return"        // Return
+        case 53: key = "Escape"
+        case 51: key = "BackSpace"
+        case 117: key = "Delete"
+        case 48: key = "Tab"
+        case 123: key = "Left"
+        case 124: key = "Right"
+        case 125: key = "Down"
+        case 126: key = "Up"
+        case 116: key = "Page_Up"
+        case 121: key = "Page_Down"
+        case 115: key = "Home"
+        case 119: key = "End"
+        default:
+            // If any modifier is set, treat the character as a chord.
+            if !modifiers.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
+                key = chars
+            } else {
+                key = nil
+            }
+        }
+        guard let k = key else { return nil }
+        return (k, modifiers)
     }
 }
