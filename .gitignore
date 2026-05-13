@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcworkspace/contents.xcworkspacedata
+*.xcworkspace/xcuserdata/
+**/xcshareddata/WorkspaceSettings.xcsettings
+**/xcshareddata/IDEWorkspaceChecks.plist
+**/xcuserdata/
+DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+.build/
+
+# XcodeGen output (regenerated from project.yml)
+Diakonos.xcodeproj/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Misc
+*.tmp
+*.swp
+*~
