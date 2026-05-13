@@ -2,21 +2,23 @@ import SwiftUI
 
 struct RootView: View {
     @State private var agentMode: AgentMode = .manual
-    @State private var sandboxState: SandboxState = .initializing
+    @StateObject private var sandbox = CUASandboxManager()
 
     var body: some View {
         VStack(spacing: 0) {
             WorkspaceToolbar(
                 agentMode: $agentMode,
-                sandboxState: sandboxState,
+                sandboxState: sandbox.state,
                 onSettings: openPreferences,
                 onFullscreen: toggleFullscreen
             )
 
             WorkspaceView()
+                .environmentObject(sandbox)
         }
         .background(DesignTokens.Palette.bgApp.ignoresSafeArea())
         .frame(minWidth: 1024, minHeight: 640)
+        .onAppear { sandbox.start() }
     }
 
     private func openPreferences() {
