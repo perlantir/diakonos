@@ -23,33 +23,59 @@ struct BrowserPaneView: View {
     @State private var addressInput: String = ""
     @State private var displayedURL: String = ""
     @State private var hasFocus = false
+    @State private var lastResizeBucket: String = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            urlBar
-            content
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                urlBar
+                content
+            }
+            .onAppear {
+                sandbox.start()
+                addressInput = preferences.browserHomeURL
+                Task { await loadInitial() }
+            }
+            .onDisappear {
+                stream.stop()
+            }
+            .task(id: bucketed(geo.size)) {
+                // Debounce 200 ms on the bucketed view size, then ask Chromium
+                // to resize itself to the current pane size so the screenshot
+                // aspect-ratio matches the viewer.
+                guard sandbox.state == .running else { return }
+                let bucket = bucketed(geo.size)
+                guard bucket != lastResizeBucket else { return }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard bucketed(geo.size) == bucket else { return }
+                lastResizeBucket = bucket
+                let w = Int(geo.size.width)
+                let h = Int(max(geo.size.height - 40, 1)) // minus URL bar
+                await sandbox.setWindowSize(width: w, height: h)
+            }
+            .onChange(of: sandbox.state) { _, new in
+                if new == .running { stream.start() }
+                else { stream.stop() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserReload)) { _ in
+                Task { await sandbox.reloadCurrent() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserResetSandbox)) { _ in
+                Task { await sandbox.resetSandbox() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserPopout)) { _ in
+                Task {
+                    await sandbox.openFloatingChromiumWindow()
+                    XpraSuppressor.relaunch()
+                }
+            }
         }
-        .onAppear {
-            sandbox.start()
-            addressInput = preferences.browserHomeURL
-            Task { await loadInitial() }
-        }
-        .onDisappear {
-            stream.stop()
-        }
-        .onChange(of: sandbox.state) { _, new in
-            if new == .running { stream.start() }
-            else { stream.stop() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserReload)) { _ in
-            Task { await sandbox.reloadCurrent() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserResetSandbox)) { _ in
-            Task { await sandbox.resetSandbox() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .diakonosBrowserPopout)) { _ in
-            Task { await sandbox.openFloatingChromiumWindow() }
-        }
+    }
+
+    /// Bucket the view size to 16px grid so we don't trigger resizes on every
+    /// pixel during a divider drag.
+    private func bucketed(_ size: CGSize) -> String {
+        "\(Int(size.width / 16) * 16)x\(Int(size.height / 16) * 16)"
     }
 
     @ViewBuilder

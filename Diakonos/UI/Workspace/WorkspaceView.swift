@@ -129,11 +129,16 @@ struct WorkspaceView: View {
         case .terminal:
             TerminalPaneView(
                 spawnIdentity: "term:\(slot.id):\(layout.respawnTag(slot.id))",
-                additionalEnvironment: EnvironmentBuilder.aiEnv(preferences: preferences),
                 focusPosition: slot.position
             )
         case .claudeCode:
             ClaudeCodePaneView(
+                preferences: preferences,
+                focusPosition: slot.position,
+                respawnTag: layout.respawnTag(slot.id)
+            )
+        case .codex:
+            CodexPaneView(
                 preferences: preferences,
                 focusPosition: slot.position,
                 respawnTag: layout.respawnTag(slot.id)
@@ -145,9 +150,12 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private func actionChip(for slot: PaneSlot) -> some View {
-        if slot.kind == .claudeCode {
+        switch slot.kind {
+        case .claudeCode:
             ClaudeCodeFolderChip(preferences: preferences)
-        } else {
+        case .codex:
+            CodexFolderChip(preferences: preferences)
+        default:
             EmptyView()
         }
     }
@@ -168,6 +176,20 @@ struct WorkspaceView: View {
             Button("Change project folder…") {
                 pickClaudeFolder()
             }
+        case .codex:
+            Button("Restart Codex") {
+                layout.bumpRespawn(slot.id)
+            }
+            Button("Change project folder…") {
+                pickCodexFolder()
+            }
+            Button("Sign in to Codex…") {
+                // codex login flow runs inside the pane on next respawn —
+                // simplest path is to send the user to the codex login command
+                // via the existing PTY. For v1.3 we just bump respawn and let
+                // codex itself surface the OAuth flow if not signed in.
+                layout.bumpRespawn(slot.id)
+            }
         case .browser:
             Button("Reload") {
                 NotificationCenter.default.post(name: .diakonosBrowserReload, object: slot.position.rawValue)
@@ -187,7 +209,29 @@ struct WorkspaceView: View {
         case .empty:      return DesignTokens.Palette.textMuted
         case .terminal:   return DesignTokens.Palette.statusHealthy
         case .claudeCode: return Color(hex: 0x8B5CF6)
-        case .browser:    return DesignTokens.Palette.accentPrimary
+        case .codex:      return Color(hex: 0x10A37F)
+        case .browser:    return preferences.accentColor
+        }
+    }
+
+    private func pickCodexFolder() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = "Choose project folder for Codex"
+        panel.prompt = "Choose"
+        panel.directoryURL = URL(fileURLWithPath: preferences.codexResolvedCwd, isDirectory: true)
+        if let win = NSApp.keyWindow {
+            panel.beginSheetModal(for: win) { resp in
+                if resp == .OK, let u = panel.url {
+                    preferences.codexFolderPath = u.path
+                }
+            }
+        } else if panel.runModal() == .OK, let u = panel.url {
+            preferences.codexFolderPath = u.path
         }
     }
 

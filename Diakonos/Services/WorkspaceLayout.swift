@@ -72,23 +72,30 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     /// Auto-numbered title: "Terminal", "Terminal 2", … when multiple
-    /// Terminal slots exist; otherwise just the kind's default label.
+    /// Terminal slots exist; same auto-numbering for Codex when multiple
+    /// Codex slots exist; otherwise just the kind's default label.
     func title(for slot: PaneSlot) -> String {
         switch slot.kind {
         case .empty:
             return "Choose pane type"
         case .terminal:
-            let terminals = slots.filter { $0.kind == .terminal }
-            if terminals.count <= 1 { return "Terminal" }
-            if let n = terminals.firstIndex(of: slot) {
-                return n == 0 ? "Terminal" : "Terminal \(n + 1)"
-            }
-            return "Terminal"
+            return autoNumberedTitle(for: slot, kind: .terminal, base: "Terminal")
         case .claudeCode:
             return "Claude Code"
+        case .codex:
+            return autoNumberedTitle(for: slot, kind: .codex, base: "Codex")
         case .browser:
             return "Browser"
         }
+    }
+
+    private func autoNumberedTitle(for slot: PaneSlot, kind: PaneSlotKind, base: String) -> String {
+        let peers = slots.filter { $0.kind == kind }
+        if peers.count <= 1 { return base }
+        if let n = peers.firstIndex(of: slot) {
+            return n == 0 ? base : "\(base) \(n + 1)"
+        }
+        return base
     }
 
     // MARK: - Persistence

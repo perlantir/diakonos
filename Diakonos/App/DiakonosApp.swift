@@ -4,12 +4,16 @@ import SwiftUI
 struct DiakonosApp: App {
     @StateObject private var preferences = Preferences()
 
+    init() {
+        XpraSuppressor.suppressOnLaunch()
+    }
+
     var body: some Scene {
         WindowGroup("Diakonos") {
             RootView()
                 .environmentObject(preferences)
                 .preferredColorScheme(preferences.colorScheme)
-                .tint(DesignTokens.Palette.accentPrimary)
+                .tint(preferences.accentColor)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
@@ -17,10 +21,6 @@ struct DiakonosApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
 
-            // Cmd+1..4 focus the four pane positions. The notification's
-            // object is the PaneSlotPosition raw value; WorkspaceView listens
-            // and uses PaneFocusRegistry to make the underlying NSView the
-            // first responder.
             CommandMenu("Pane") {
                 Button("Focus Terminal") {
                     NotificationCenter.default.post(name: .diakonosFocusSlot,
@@ -34,7 +34,7 @@ struct DiakonosApp: App {
                 }
                 .keyboardShortcut("2", modifiers: .command)
 
-                Button("Focus Terminal 2") {
+                Button("Focus Bottom-Left Pane") {
                     NotificationCenter.default.post(name: .diakonosFocusSlot,
                                                     object: PaneSlotPosition.bottomLeft.rawValue)
                 }
@@ -51,7 +51,7 @@ struct DiakonosApp: App {
         Settings {
             PreferencesWindow(preferences: preferences)
                 .preferredColorScheme(preferences.colorScheme)
-                .tint(DesignTokens.Palette.accentPrimary)
+                .tint(preferences.accentColor)
         }
     }
 }

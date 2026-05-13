@@ -1,50 +1,38 @@
 import SwiftUI
 import AppKit
-import SwiftTerm
 
-/// One-line constant — flip to disable Claude Code's auto-trust keystroke
-/// injection if the prompt-injection misbehaves on a future claude version.
-private let claudeAutoTrustEnabled = true
-
-/// Claude Code pane — runs `claude --dangerously-skip-permissions` natively in a
-/// user-selected project folder. Folder defaults to `$HOME`; user can change it
-/// any time via the header chip; selection persists across launches in
-/// UserDefaults. Changing the folder kills + respawns claude.
+/// Codex pane — runs `codex --dangerously-bypass-approvals-and-sandbox` natively
+/// in a user-selected project folder.
 ///
-/// On every spawn, after a 1500 ms delay we inject `1\r` (`'1'` followed by
-/// Enter) to auto-accept the "Do you trust this folder?" prompt. If the prompt
-/// isn't shown (folder already trusted), the `1` lands harmlessly in the input
-/// box — minor UX nit, easy to recover from. Constant above disables.
-struct ClaudeCodePaneView: View {
+/// Differences from `ClaudeCodePaneView`:
+///   - Codex's YOLO flag is `--dangerously-bypass-approvals-and-sandbox`
+///     (vs claude's `--dangerously-skip-permissions`).
+///   - No auto-trust keystroke injection: with the YOLO flag set, codex does
+///     not display a numeric trust prompt.
+///   - Persisted folder under `Preferences.codexFolderPath`.
+///   - OAuth handled by `codex login` (the CLI manages it on first launch).
+struct CodexPaneView: View {
     @ObservedObject var preferences: Preferences
     var focusPosition: PaneSlotPosition? = nil
     var respawnTag: String = ""
 
     var body: some View {
         TerminalPaneView(
-            workingDirectory: preferences.claudeCodeResolvedCwd,
-            commandOverride: claudeCommand(),
-            spawnIdentity: "claude:\(preferences.claudeCodeResolvedCwd):\(respawnTag)",
+            workingDirectory: preferences.codexResolvedCwd,
+            commandOverride: codexCommand(),
+            spawnIdentity: "codex:\(preferences.codexResolvedCwd):\(respawnTag)",
             focusPosition: focusPosition,
-            onSpawn: { term in
-                MCPRegistration.shared.ensureClaudeRegistered()
-                guard claudeAutoTrustEnabled else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    let bytes: [UInt8] = Array("1\r".utf8)
-                    term.process.send(data: bytes[...])
-                }
+            onSpawn: { _ in
+                MCPRegistration.shared.ensureCodexRegistered()
             }
         )
     }
 
-    /// `$SHELL -l -c "cd <cwd> && exec claude --dangerously-skip-permissions"`.
-    /// Login shell so PATH and friends populate. `exec` so the shell hands the
-    /// PTY directly to claude.
-    private func claudeCommand() -> TerminalCommand {
+    private func codexCommand() -> TerminalCommand {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let cwd = preferences.claudeCodeResolvedCwd
+        let cwd = preferences.codexResolvedCwd
         let escapedCwd = cwd.replacingOccurrences(of: "\"", with: "\\\"")
-        let line = "cd \"\(escapedCwd)\" && exec claude --dangerously-skip-permissions"
+        let line = "cd \"\(escapedCwd)\" && exec codex --dangerously-bypass-approvals-and-sandbox"
         return TerminalCommand(
             executable: shell,
             args: ["-l", "-c", line],
@@ -53,8 +41,9 @@ struct ClaudeCodePaneView: View {
     }
 }
 
-/// Header chip — shows folder name, click opens NSOpenPanel and updates preferences.
-struct ClaudeCodeFolderChip: View {
+/// Folder chip for the Codex pane — mirrors ClaudeCodeFolderChip but reads /
+/// writes `preferences.codexFolderPath`.
+struct CodexFolderChip: View {
     @ObservedObject var preferences: Preferences
     @State private var hovering = false
 
@@ -83,11 +72,11 @@ struct ClaudeCodeFolderChip: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(preferences.claudeCodeResolvedCwd)
+        .help(preferences.codexResolvedCwd)
     }
 
     private var displayName: String {
-        let url = URL(fileURLWithPath: preferences.claudeCodeResolvedCwd)
+        let url = URL(fileURLWithPath: preferences.codexResolvedCwd)
         return url.lastPathComponent.isEmpty ? "/" : url.lastPathComponent
     }
 
@@ -99,20 +88,20 @@ struct ClaudeCodeFolderChip: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.title = "Choose project folder for Claude Code"
+        panel.title = "Choose project folder for Codex"
         panel.prompt = "Choose"
-        panel.directoryURL = URL(fileURLWithPath: preferences.claudeCodeResolvedCwd,
+        panel.directoryURL = URL(fileURLWithPath: preferences.codexResolvedCwd,
                                  isDirectory: true)
 
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window) { response in
                 if response == .OK, let url = panel.url {
-                    preferences.claudeCodeFolderPath = url.path
+                    preferences.codexFolderPath = url.path
                 }
             }
         } else {
             if panel.runModal() == .OK, let url = panel.url {
-                preferences.claudeCodeFolderPath = url.path
+                preferences.codexFolderPath = url.path
             }
         }
     }

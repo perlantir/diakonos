@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Persistent user preferences. Mirrored to UserDefaults so settings survive
-/// across launches. API keys are stored in Keychain, not UserDefaults (see
-/// `KeychainStore`).
+/// across launches. v1.3 dropped the Keychain-backed API-key fields and the
+/// model picker — agents (Claude Code, Codex) auth via their own CLIs.
 @MainActor
 final class Preferences: ObservableObject {
 
@@ -13,17 +13,28 @@ final class Preferences: ObservableObject {
     }
 
     @AppStorage("appearance") private var appearanceRaw: String = Appearance.system.rawValue
-    @AppStorage("preferredModel") var preferredModel: String = "claude-opus-4-7"
+    @AppStorage("accentColorHex") var accentColorHex: String = "#2F6BFF"
     @AppStorage("browserHomeURL") var browserHomeURL: String = "https://duckduckgo.com"
     @AppStorage("claudeCodeFolderPath") var claudeCodeFolderPath: String = ""
-
-    @Published var anthropicKey: String = KeychainStore.read(.anthropic) ?? ""
-    @Published var openAIKey: String = KeychainStore.read(.openai) ?? ""
-    @Published var googleAIKey: String = KeychainStore.read(.googleAI) ?? ""
+    @AppStorage("codexFolderPath") var codexFolderPath: String = ""
 
     var appearance: Appearance {
         get { Appearance(rawValue: appearanceRaw) ?? .system }
         set { appearanceRaw = newValue.rawValue }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch appearance {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+
+    /// Runtime-resolved accent color. Falls back to the v1.2 hex if the stored
+    /// value is malformed.
+    var accentColor: Color {
+        Color(hexString: accentColorHex) ?? Color(hex: 0x2F6BFF)
     }
 
     /// Resolved cwd for the Claude Code pane. Empty preference = $HOME default.
@@ -33,19 +44,20 @@ final class Preferences: ObservableObject {
         return (trimmed as NSString).expandingTildeInPath
     }
 
-    func persistAPIKey(_ key: KeychainStore.Key, value: String) {
-        if value.isEmpty {
-            KeychainStore.delete(key)
-        } else {
-            KeychainStore.write(key, value: value)
-        }
+    /// Resolved cwd for the Codex pane. Empty preference = $HOME default.
+    var codexResolvedCwd: String {
+        let trimmed = codexFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return NSHomeDirectory() }
+        return (trimmed as NSString).expandingTildeInPath
     }
+}
 
-    var colorScheme: ColorScheme? {
-        switch appearance {
-        case .system: return nil
-        case .light:  return .light
-        case .dark:   return .dark
-        }
+extension Color {
+    /// Parse `#RRGGBB` or `RRGGBB` into a Color, nil on malformed input.
+    init?(hexString: String) {
+        var s = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        self.init(hex: value)
     }
 }

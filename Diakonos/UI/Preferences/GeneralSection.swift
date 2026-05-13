@@ -20,7 +20,7 @@ struct GeneralSection: View {
                     }
                     PreferenceRow(label: "Accent color",
                                   detail: "Used for buttons, indicators, and highlights.") {
-                        AccentChipRow()
+                        AccentChipRow(preferences: preferences)
                     }
                 }
 

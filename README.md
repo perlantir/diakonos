@@ -12,7 +12,25 @@ Open source, MIT.
 
 ## Status
 
-v1.2 in active development. Not yet released.
+v1.3 in active development. Not yet released.
+
+## What's in v1.3 (built on v1.2)
+
+- **Codex pane** — runs `codex --dangerously-bypass-approvals-and-sandbox`
+  natively with its own folder picker. OAuth handled by `codex login`.
+- **Computer-use MCP bridge** — Claude Code and Codex panes get auto-registered
+  with a `diakonos-browser` MCP server that exposes the sandboxed Chromium as
+  `browser_screenshot / browser_click / browser_type / browser_key /
+  browser_scroll / browser_navigate / browser_current_url` tools. Agent
+  panes can drive what the Browser pane shows.
+- **Dynamic Chromium resize** — Browser pane observes its size; Chromium
+  resizes inside the sandbox to match (via CDP `Browser.setWindowBounds`).
+- **Floating Xpra Mac window suppressed by default** — cua's per-window
+  Mac surface is killed; opt in via Browser 3-dot → "Open in floating window".
+- **Accent picker actually works** — 7-chip selector in Settings → General,
+  persisted across launches, applied via `.tint()`.
+- **No API keys to configure** — agents auth via their own CLI subscriptions
+  (`claude login`, `codex login`).
 
 ## What's in v1.2
 
@@ -47,8 +65,9 @@ v1.2 in active development. Not yet released.
 
 ## ⚠️ Security note
 
-The Claude Code pane runs `claude --dangerously-skip-permissions`. **This
-means Claude Code can read, modify, and delete any file on your Mac that
+The Claude Code pane runs `claude --dangerously-skip-permissions`. The
+Codex pane runs `codex --dangerously-bypass-approvals-and-sandbox`. **Both
+mean the agent can read, modify, and delete any file on your Mac that
 your user account can touch — without prompting you for confirmation on
 each operation.** That's an intentional product choice for a power-user
 workspace, but it means:

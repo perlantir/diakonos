@@ -83,27 +83,37 @@ struct SecretField: View {
     }
 }
 
-/// Accent-color chip row used in General → Appearance.
+/// Accent-color chip row — stateful in v1.3. Picks one of seven preset hexes;
+/// writes the chosen hex to `preferences.accentColorHex` and the rest of the
+/// app reads `preferences.accentColor` to resolve it at runtime.
 struct AccentChipRow: View {
-    private let chips: [Color] = [
-        Color(hex: 0x2F6BFF), Color(hex: 0x8B5CF6), Color(hex: 0x22C55E),
-        Color(hex: 0xF59E0B), Color(hex: 0xEF4444), Color(hex: 0xEC4899),
-        Color(hex: 0x06B6D4)
+    @ObservedObject var preferences: Preferences
+
+    private let chips: [String] = [
+        "#2F6BFF", "#8B5CF6", "#22C55E",
+        "#F59E0B", "#EF4444", "#EC4899",
+        "#06B6D4"
     ]
+
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.s2) {
-            ForEach(chips.indices, id: \.self) { i in
-                let isAccent = i == 0
-                ZStack {
-                    Circle()
-                        .fill(chips[i])
-                        .frame(width: 22, height: 22)
-                    if isAccent {
+            ForEach(chips, id: \.self) { hex in
+                let isSelected = preferences.accentColorHex.uppercased() == hex.uppercased()
+                Button {
+                    preferences.accentColorHex = hex
+                } label: {
+                    ZStack {
                         Circle()
-                            .strokeBorder(DesignTokens.Palette.textPrimary, lineWidth: 2)
-                            .frame(width: 26, height: 26)
+                            .fill(Color(hexString: hex) ?? .gray)
+                            .frame(width: 22, height: 22)
+                        if isSelected {
+                            Circle()
+                                .strokeBorder(DesignTokens.Palette.textPrimary, lineWidth: 2)
+                                .frame(width: 26, height: 26)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             }
         }
     }

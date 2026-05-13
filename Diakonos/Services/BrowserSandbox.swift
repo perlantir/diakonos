@@ -85,32 +85,49 @@ final class BrowserSandbox: ObservableObject {
         await ensureChromium()
         await ensureNavHelper()
 
-        // First try the Python CDP helper: navigate current tab.
+        // Python CDP helper: navigate current tab.
         let escaped = normalized.replacingOccurrences(of: "'", with: "'\\''")
-        let helperCmd = "python3 /tmp/diakonos-nav.py '\(escaped)' 2>/tmp/diakonos-nav.err || echo NAV_FAILED"
-        let result = await postBashCapturing(helperCmd)
-        if result.contains("NAV_FAILED") {
-            // Fallback: xdotool Ctrl+L → type → Enter against the Chromium window.
-            let xdoFallback = """
-            DISPLAY=:100 xdotool search --onlyvisible --name 'Chromium\\|Chrome' windowactivate --sync \
-              key --clearmodifiers ctrl+l \
-              type '\(escaped)' \
-              key --clearmodifiers Return 2>/dev/null || true
-            """
-            await postBash(xdoFallback)
-        }
+        let helperCmd = "python3 /tmp/diakonos-nav.py 'navigate' '\(escaped)' 2>/tmp/diakonos-nav.err || echo HELPER_FAILED"
+        _ = await postBashCapturing(helperCmd)
+        // If the helper failed we just log to /tmp/diakonos-nav.err; user can
+        // retry. v1.1's xdotool fallback was removed because xdotool isn't
+        // installed in the cuabot image.
     }
 
+    /// Reload current tab via CDP (Page.reload). v1.1/v1.2 used xdotool which
+    /// is NOT installed in cuabot's image — that path silently failed.
     func reloadCurrent() async {
-        await postBash("DISPLAY=:100 xdotool key --clearmodifiers F5 2>/dev/null || true")
+        await runHelper(action: "reload")
     }
 
+    /// CDP Page.goBack.
     func goBack() async {
-        await postBash("DISPLAY=:100 xdotool key --clearmodifiers alt+Left 2>/dev/null || true")
+        await runHelper(action: "back")
     }
 
+    /// CDP Page.goForward.
     func goForward() async {
-        await postBash("DISPLAY=:100 xdotool key --clearmodifiers alt+Right 2>/dev/null || true")
+        await runHelper(action: "forward")
+    }
+
+    /// Resize Chromium's viewport to W×H via CDP Browser.setWindowBounds.
+    /// Used by BrowserPaneView when the pane's NSView size changes so the
+    /// in-sandbox Chromium matches the viewer's aspect ratio.
+    func setWindowSize(width: Int, height: Int) async {
+        await ensureChromium()
+        await ensureNavHelper()
+        await runHelper(action: "resize", arg: "\(width)x\(height)")
+    }
+
+    /// Invoke the in-container Python helper with `action` (and optional arg).
+    /// The helper handles Page.navigate / reload / back / forward and
+    /// Browser.setWindowBounds via the CDP WebSocket.
+    private func runHelper(action: String, arg: String = "") async {
+        await ensureChromium()
+        await ensureNavHelper()
+        let escArg = arg.replacingOccurrences(of: "'", with: "'\\''")
+        let cmd = "python3 /tmp/diakonos-nav.py '\(action)' '\(escArg)' 2>/tmp/diakonos-nav.err || echo HELPER_FAILED"
+        _ = await postBashCapturing(cmd)
     }
 
     /// Spawn a fresh Chromium window for the user's "pop-out" action.
@@ -165,27 +182,73 @@ final class BrowserSandbox: ObservableObject {
         let installCmd = "pip3 install --user --quiet websockets 2>/dev/null || pip install --user --quiet websockets 2>/dev/null || true"
         await postBash(installCmd)
 
-        // 2) Write the helper.
+        // 2) Write the helper. Multi-action: navigate / reload / back /
+        //    forward / resize. Single Python script so the WebSocket
+        //    connection setup is shared.
         let script = """
         import json, sys, urllib.request, asyncio
-        async def main(url):
+        async def cdp_session():
             try:
                 import websockets
             except Exception:
-                print('NAV_FAILED: websockets not available'); return 1
+                print('HELPER_FAILED: websockets not available')
+                return None, None
             data = urllib.request.urlopen('http://localhost:\(cdpPort)/json', timeout=2).read()
             tabs = [t for t in json.loads(data) if t.get('type')=='page']
             if not tabs:
-                print('NAV_FAILED: no tabs'); return 1
+                print('HELPER_FAILED: no tabs'); return None, None
             ws_url = tabs[0]['webSocketDebuggerUrl']
-            async with websockets.connect(ws_url, ping_interval=None) as ws:
-                await ws.send(json.dumps({'id':1,'method':'Page.navigate','params':{'url':url}}))
-                await ws.recv()
-            print('NAV_OK')
-            return 0
+            ws = await websockets.connect(ws_url, ping_interval=None)
+            return ws, tabs[0]
+        async def send(ws, method, params=None, mid=1):
+            await ws.send(json.dumps({'id': mid, 'method': method, 'params': params or {}}))
+            return await ws.recv()
+        async def main(action, arg):
+            ws, _tab = await cdp_session()
+            if ws is None: return 1
+            try:
+                if action == 'navigate':
+                    await send(ws, 'Page.navigate', {'url': arg}, 1)
+                elif action == 'reload':
+                    await send(ws, 'Page.reload', {}, 1)
+                elif action == 'back':
+                    res = await send(ws, 'Page.getNavigationHistory', {}, 1)
+                    h = json.loads(res); entries = h.get('result', {}).get('entries', [])
+                    idx = h.get('result', {}).get('currentIndex', 0)
+                    if idx > 0:
+                        await send(ws, 'Page.navigateToHistoryEntry', {'entryId': entries[idx-1]['id']}, 2)
+                elif action == 'forward':
+                    res = await send(ws, 'Page.getNavigationHistory', {}, 1)
+                    h = json.loads(res); entries = h.get('result', {}).get('entries', [])
+                    idx = h.get('result', {}).get('currentIndex', 0)
+                    if idx < len(entries) - 1:
+                        await send(ws, 'Page.navigateToHistoryEntry', {'entryId': entries[idx+1]['id']}, 2)
+                elif action == 'resize':
+                    try:
+                        w_s, h_s = arg.split('x', 1)
+                        w, h = int(w_s), int(h_s)
+                    except Exception:
+                        print('HELPER_FAILED: bad resize arg'); await ws.close(); return 1
+                    # Find browser-level window for this target via Browser.getWindowForTarget
+                    target_id = _tab.get('id') or _tab.get('targetId')
+                    if target_id:
+                        gw = await send(ws, 'Browser.getWindowForTarget', {'targetId': target_id}, 2)
+                        try:
+                            window_id = json.loads(gw)['result']['windowId']
+                            await send(ws, 'Browser.setWindowBounds',
+                                       {'windowId': window_id, 'bounds': {'width': w, 'height': h, 'windowState': 'normal'}}, 3)
+                        except Exception as e:
+                            print(f'HELPER_FAILED: setWindowBounds: {e}'); await ws.close(); return 1
+                else:
+                    print(f'HELPER_FAILED: unknown action {action}'); await ws.close(); return 1
+                print('HELPER_OK')
+                return 0
+            finally:
+                await ws.close()
         if __name__ == '__main__':
-            url = sys.argv[1] if len(sys.argv) > 1 else ''
-            sys.exit(asyncio.run(main(url)) or 0)
+            action = sys.argv[1] if len(sys.argv) > 1 else 'navigate'
+            arg = sys.argv[2] if len(sys.argv) > 2 else ''
+            sys.exit(asyncio.run(main(action, arg)) or 0)
         """
         // Write via base64 to avoid shell-quote escaping headaches.
         let b64 = Data(script.utf8).base64EncodedString()

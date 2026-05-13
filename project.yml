@@ -31,6 +31,10 @@ targets:
     platform: macOS
     sources:
       - path: Diakonos
+        excludes:
+          - "Resources/**"
+      - path: Diakonos/Resources
+        buildPhase: resources
     dependencies:
       - package: SwiftTerm
     info:

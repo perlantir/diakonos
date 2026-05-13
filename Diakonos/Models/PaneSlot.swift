@@ -13,6 +13,7 @@ enum PaneSlotKind: String, Codable, CaseIterable, Identifiable {
     case empty
     case terminal
     case claudeCode
+    case codex
     case browser
 
     var id: String { rawValue }
@@ -23,6 +24,7 @@ enum PaneSlotKind: String, Codable, CaseIterable, Identifiable {
         case .empty:      return "Empty"
         case .terminal:   return "Terminal"
         case .claudeCode: return "Claude Code"
+        case .codex:      return "Codex"
         case .browser:    return "Browser"
         }
     }
@@ -33,6 +35,7 @@ enum PaneSlotKind: String, Codable, CaseIterable, Identifiable {
         case .empty:      return "square.dashed"
         case .terminal:   return "terminal.fill"
         case .claudeCode: return "sparkles"
+        case .codex:      return "chevron.left.forwardslash.chevron.right"
         case .browser:    return "globe"
         }
     }
@@ -40,9 +43,7 @@ enum PaneSlotKind: String, Codable, CaseIterable, Identifiable {
 
 enum PaneSlotViewState: String, Codable {
     case normal
-    case minimized       // Collapsed to header only.
-    // .maximized is not stored on the slot — it's a workspace-wide state
-    // tracked separately in WorkspaceLayout.maximizedSlotID.
+    case minimized
 }
 
 /// User-state for a single slot. Persisted to UserDefaults as JSON.
