@@ -195,54 +195,46 @@ final class ChatScreenNSView: NSView {
         Task { await CDPInput.scroll(port: sandbox.kind.cdpPort, x: nx, y: ny, dy: dy) }
     }
 
-    // MARK: - Keyboard forwarding
+    // MARK: - Keyboard forwarding (v1.6 unified pipeline)
+    //
+    // Single source of truth: `KeyboardEventTranslator`. It classifies the
+    // NSEvent into a typing / chord / clipboard route. We just dispatch.
+    // The translator's policy:
+    //   - Shift / Option are TYPING modifiers (Shift+2 → "@", Opt+e → "´")
+    //   - Cmd / Ctrl are COMMAND modifiers (Cmd+V → chord/clipboard)
+    //   - Named specials (arrows, F-keys, Enter, etc.) → dispatchKey
+    //   - Cmd+V → ClipboardBridge.paste (Mac → sandbox)
+    //   - Cmd+C/X → ClipboardBridge.copyFromBrowser (sandbox → Mac) + forward chord
 
     override func keyDown(with event: NSEvent) {
         guard let sandbox = coordinator?.sandbox else { return }
         let port = sandbox.kind.cdpPort
-        // Map special keys; printable characters go through dispatchType.
-        if let (name, mods) = mapSpecialKey(event: event) {
+        switch KeyboardEventTranslator.classify(event) {
+        case .type(let text):
+            Task { await CDPInput.dispatchType(port: port, text: text) }
+        case .key(let name, let mods):
             Task { await CDPInput.dispatchKey(port: port, name: name, modifiers: mods) }
-            return
+        case .clipboardPaste:
+            Task { @MainActor in
+                await ClipboardBridge.paste(toPort: port)
+            }
+        case .clipboardCopy:
+            Task { @MainActor in
+                // Scrape the sandbox's selection text into NSPasteboard first,
+                // then forward the Cmd+C chord so the page's native copy
+                // handler (which may attach richer mime types) still fires.
+                await ClipboardBridge.copyFromBrowser(port: port)
+                await CDPInput.dispatchKey(port: port, name: "c", modifiers: ["super"])
+            }
+        case .clipboardCut:
+            Task { @MainActor in
+                await ClipboardBridge.copyFromBrowser(port: port)
+                // Cmd+X chord — Chromium's native handler performs the cut
+                // on its side after we've captured the text.
+                await CDPInput.dispatchKey(port: port, name: "x", modifiers: ["super"])
+            }
+        case .ignore:
+            break
         }
-        let chars = event.characters ?? ""
-        if !chars.isEmpty {
-            Task { await CDPInput.dispatchType(port: port, text: chars) }
-        }
-    }
-
-    private func mapSpecialKey(event: NSEvent) -> (String, [String])? {
-        var mods: [String] = []
-        let f = event.modifierFlags
-        if f.contains(.command) { mods.append("super") }
-        if f.contains(.option)  { mods.append("alt") }
-        if f.contains(.control) { mods.append("ctrl") }
-        if f.contains(.shift)   { mods.append("shift") }
-        let name: String?
-        switch Int(event.keyCode) {
-        case 36: name = "Return"
-        case 53: name = "Escape"
-        case 51: name = "BackSpace"
-        case 117: name = "Delete"
-        case 48: name = "Tab"
-        case 123: name = "Left"
-        case 124: name = "Right"
-        case 125: name = "Down"
-        case 126: name = "Up"
-        case 116: name = "Page_Up"
-        case 121: name = "Page_Down"
-        case 115: name = "Home"
-        case 119: name = "End"
-        default:
-            // Only route through dispatchKey for control combos (Cmd+/Ctrl+/Opt+).
-            // Plain shifted characters (Shift+2 → @) go through dispatchType so
-            // Chromium gets the right printable char.
-            let controlMods = f.contains(.command) || f.contains(.control) || f.contains(.option)
-            if controlMods, let c = event.charactersIgnoringModifiers, !c.isEmpty {
-                name = c
-            } else { name = nil }
-        }
-        guard let n = name else { return nil }
-        return (n, mods)
     }
 }

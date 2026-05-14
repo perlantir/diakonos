@@ -1,18 +1,28 @@
 import SwiftUI
 import AppKit
 
-/// v1.2 — slot-driven 2x2 pane grid.
-///   - Slots TL/TR/BL/BR are fixed; kinds inside them are user-controlled and
-///     persisted via `WorkspaceLayout` in UserDefaults.
-///   - One slot can be "maximized" → renders full-bleed, others hidden.
-///   - Minimized slots collapse to header height.
+/// v1.6 — slot-driven workspace grid. Supports two modes:
+///   - **4-pane** (default): 2×2 grid (TL/TR/BL/BR). One column divider,
+///     one row divider, both draggable.
+///   - **6-pane**: 2×3 grid (TL/TM/TR/BL/BM/BR). Two column dividers, one
+///     row divider, all draggable.
+/// Mode is owned by `WorkspaceLayout` (lifted to `RootView` in v1.6 so the
+/// toolbar can toggle it). Slot kinds inside positions are user-controlled
+/// and persisted via UserDefaults under the `workspaceLayout.v2` key.
 struct WorkspaceView: View {
     @EnvironmentObject private var preferences: Preferences
-    @StateObject private var layout = WorkspaceLayout()
+    @EnvironmentObject private var layout: WorkspaceLayout
 
+    // 4-pane: one column split.
     @State private var columnSplit: CGFloat = 0.5
-    @State private var rowSplit: CGFloat = 0.5
     @State private var columnSplitBase: CGFloat = 0.5
+    // 6-pane: two column splits at ~1/3 and ~2/3.
+    @State private var colSplit1: CGFloat = 1.0 / 3.0
+    @State private var colSplit2: CGFloat = 2.0 / 3.0
+    @State private var colSplit1Base: CGFloat = 1.0 / 3.0
+    @State private var colSplit2Base: CGFloat = 2.0 / 3.0
+    // Row split (shared).
+    @State private var rowSplit: CGFloat = 0.5
     @State private var rowSplitBase: CGFloat = 0.5
 
     private let gutter: CGFloat = DesignTokens.Spacing.s3
@@ -33,52 +43,132 @@ struct WorkspaceView: View {
                   let pos = PaneSlotPosition(rawValue: raw) else { return }
             PaneFocusRegistry.shared.focus(pos)
         }
-    }
-
-    private var grid: some View {
-        GeometryReader { geo in
-            let totalW = geo.size.width
-            let totalH = geo.size.height
-
-            let leftW  = max(220, totalW * columnSplit  - gutter / 2)
-            let rightW = max(220, totalW * (1 - columnSplit) - gutter / 2)
-            let topH   = max(160, totalH * rowSplit     - gutter / 2)
-            let botH   = max(160, totalH * (1 - rowSplit) - gutter / 2)
-
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    slotCell(at: .topLeft, w: leftW, h: topH)
-                    SplitDivider(axis: .vertical,
-                                 onDrag: { dx in
-                                     columnSplit = clampSplit(columnSplitBase + dx / totalW)
-                                 },
-                                 onDragEnded: { columnSplitBase = columnSplit })
-                    .frame(height: topH)
-                    slotCell(at: .topRight, w: rightW, h: topH)
-                }
-
-                SplitDivider(axis: .horizontal,
-                             onDrag: { dy in
-                                 rowSplit = clampSplit(rowSplitBase + dy / totalH)
-                             },
-                             onDragEnded: { rowSplitBase = rowSplit })
-                .frame(width: totalW)
-
-                HStack(spacing: 0) {
-                    slotCell(at: .bottomLeft, w: leftW, h: botH)
-                    SplitDivider(axis: .vertical,
-                                 onDrag: { dx in
-                                     columnSplit = clampSplit(columnSplitBase + dx / totalW)
-                                 },
-                                 onDragEnded: { columnSplitBase = columnSplit })
-                    .frame(height: botH)
-                    slotCell(at: .bottomRight, w: rightW, h: botH)
-                }
-            }
-            .padding(.horizontal, gutter)
-            .padding(.bottom, gutter)
+        .onReceive(NotificationCenter.default.publisher(for: .diakonosFocusIndex)) { note in
+            // 1-based Cmd+1..6 mapped to the current pane-count's reading order.
+            guard let idx = note.object as? Int, idx >= 1 else { return }
+            let positions = layout.paneCount.positions
+            guard idx <= positions.count else { return }
+            PaneFocusRegistry.shared.focus(positions[idx - 1])
         }
     }
+
+    @ViewBuilder
+    private var grid: some View {
+        GeometryReader { geo in
+            switch layout.paneCount {
+            case .four: fourPaneGrid(geo: geo)
+            case .six:  sixPaneGrid(geo: geo)
+            }
+        }
+    }
+
+    // MARK: - 4-pane (2×2)
+
+    @ViewBuilder
+    private func fourPaneGrid(geo: GeometryProxy) -> some View {
+        let totalW = geo.size.width
+        let totalH = geo.size.height
+        let leftW  = max(220, totalW * columnSplit         - gutter / 2)
+        let rightW = max(220, totalW * (1 - columnSplit)   - gutter / 2)
+        let topH   = max(160, totalH * rowSplit            - gutter / 2)
+        let botH   = max(160, totalH * (1 - rowSplit)      - gutter / 2)
+
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                slotCell(at: .topLeft, w: leftW, h: topH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 columnSplit = clampSplit(columnSplitBase + dx / totalW)
+                             },
+                             onDragEnded: { columnSplitBase = columnSplit })
+                .frame(height: topH)
+                slotCell(at: .topRight, w: rightW, h: topH)
+            }
+
+            SplitDivider(axis: .horizontal,
+                         onDrag: { dy in
+                             rowSplit = clampSplit(rowSplitBase + dy / totalH)
+                         },
+                         onDragEnded: { rowSplitBase = rowSplit })
+            .frame(width: totalW)
+
+            HStack(spacing: 0) {
+                slotCell(at: .bottomLeft, w: leftW, h: botH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 columnSplit = clampSplit(columnSplitBase + dx / totalW)
+                             },
+                             onDragEnded: { columnSplitBase = columnSplit })
+                .frame(height: botH)
+                slotCell(at: .bottomRight, w: rightW, h: botH)
+            }
+        }
+        .padding(.horizontal, gutter)
+        .padding(.bottom, gutter)
+    }
+
+    // MARK: - 6-pane (2×3)
+
+    @ViewBuilder
+    private func sixPaneGrid(geo: GeometryProxy) -> some View {
+        let totalW = geo.size.width
+        let totalH = geo.size.height
+        // Two column boundaries split the width into three columns.
+        let leftW  = max(180, totalW * colSplit1                        - gutter / 2)
+        let midW   = max(180, totalW * (colSplit2 - colSplit1)          - gutter)
+        let rightW = max(180, totalW * (1 - colSplit2)                  - gutter / 2)
+        let topH   = max(160, totalH * rowSplit                         - gutter / 2)
+        let botH   = max(160, totalH * (1 - rowSplit)                   - gutter / 2)
+
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                slotCell(at: .topLeft, w: leftW, h: topH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 colSplit1 = clamp6Split1(colSplit1Base + dx / totalW)
+                             },
+                             onDragEnded: { colSplit1Base = colSplit1 })
+                .frame(height: topH)
+                slotCell(at: .topMid, w: midW, h: topH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 colSplit2 = clamp6Split2(colSplit2Base + dx / totalW)
+                             },
+                             onDragEnded: { colSplit2Base = colSplit2 })
+                .frame(height: topH)
+                slotCell(at: .topRight, w: rightW, h: topH)
+            }
+
+            SplitDivider(axis: .horizontal,
+                         onDrag: { dy in
+                             rowSplit = clampSplit(rowSplitBase + dy / totalH)
+                         },
+                         onDragEnded: { rowSplitBase = rowSplit })
+            .frame(width: totalW)
+
+            HStack(spacing: 0) {
+                slotCell(at: .bottomLeft, w: leftW, h: botH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 colSplit1 = clamp6Split1(colSplit1Base + dx / totalW)
+                             },
+                             onDragEnded: { colSplit1Base = colSplit1 })
+                .frame(height: botH)
+                slotCell(at: .bottomMid, w: midW, h: botH)
+                SplitDivider(axis: .vertical,
+                             onDrag: { dx in
+                                 colSplit2 = clamp6Split2(colSplit2Base + dx / totalW)
+                             },
+                             onDragEnded: { colSplit2Base = colSplit2 })
+                .frame(height: botH)
+                slotCell(at: .bottomRight, w: rightW, h: botH)
+            }
+        }
+        .padding(.horizontal, gutter)
+        .padding(.bottom, gutter)
+    }
+
+    // MARK: - Cells
 
     @ViewBuilder
     private func slotCell(at pos: PaneSlotPosition, w: CGFloat, h: CGFloat) -> some View {
@@ -190,16 +280,10 @@ struct WorkspaceView: View {
                 pickCodexFolder()
             }
             Button("Sign in to Codex…") {
-                // codex login flow runs inside the pane on next respawn —
-                // simplest path is to send the user to the codex login command
-                // via the existing PTY. For v1.3 we just bump respawn and let
-                // codex itself surface the OAuth flow if not signed in.
                 layout.bumpRespawn(slot.id)
             }
         case .claudeChat:
-            Button("Sign in to Claude…") {
-                // navigates to https://claude.ai which prompts login
-            }
+            Button("Sign in to Claude…") { }
         case .chatgptChat:
             Button("Sign in to ChatGPT…") { }
         case .browser:
@@ -222,8 +306,8 @@ struct WorkspaceView: View {
         case .terminal:    return DesignTokens.Palette.statusHealthy
         case .claudeCode:  return Color(hex: 0x8B5CF6)
         case .codex:       return Color(hex: 0x10A37F)
-        case .claudeChat:  return Color(hex: 0xCC785C)   // Anthropic warm tan
-        case .chatgptChat: return Color(hex: 0x10A37F)   // OpenAI green
+        case .claudeChat:  return Color(hex: 0xCC785C)
+        case .chatgptChat: return Color(hex: 0x10A37F)
         case .browser:     return preferences.accentColor
         }
     }
@@ -273,6 +357,14 @@ struct WorkspaceView: View {
     private func clampSplit(_ value: CGFloat) -> CGFloat {
         min(max(value, 0.15), 0.85)
     }
+    /// 6-pane left column boundary: 0.15..min(0.50, colSplit2-0.10).
+    private func clamp6Split1(_ value: CGFloat) -> CGFloat {
+        min(max(value, 0.15), min(0.50, colSplit2 - 0.10))
+    }
+    /// 6-pane right column boundary: max(0.50, colSplit1+0.10)..0.85.
+    private func clamp6Split2(_ value: CGFloat) -> CGFloat {
+        max(min(value, 0.85), max(0.50, colSplit1 + 0.10))
+    }
 }
 
 extension Notification.Name {
@@ -280,4 +372,8 @@ extension Notification.Name {
     static let diakonosBrowserPopout = Notification.Name("DiakonosBrowserPopout")
     static let diakonosBrowserResetSandbox = Notification.Name("DiakonosBrowserResetSandbox")
     static let diakonosTerminalSendBytes = Notification.Name("DiakonosTerminalSendBytes")
+    /// Posted by `DiakonosApp`'s Cmd+1..6 commands. `object` is a 1-based
+    /// Int. `WorkspaceView` resolves the index against `layout.paneCount`'s
+    /// reading order to a `PaneSlotPosition`, then asks the focus registry.
+    static let diakonosFocusIndex = Notification.Name("DiakonosFocusIndex")
 }

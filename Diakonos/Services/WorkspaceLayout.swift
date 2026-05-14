@@ -2,14 +2,23 @@ import SwiftUI
 import Combine
 
 /// Owns the user-facing state of which pane lives in which slot, plus
-/// minimize/maximize state. Persists to UserDefaults as JSON.
+/// minimize/maximize and **pane count** (4 or 6 — new in v1.6). Persists to
+/// UserDefaults as JSON under a v2 schema; reads v1 (4-pane only) for
+/// backward compatibility.
 @MainActor
 final class WorkspaceLayout: ObservableObject {
 
-    static let userDefaultsKey = "workspaceLayout.slots.v1"
+    /// v1 schema (pre-v1.6): [PaneSlot] of length 4 in fourPaneOrder.
+    static let userDefaultsKeyV1 = "workspaceLayout.slots.v1"
+    /// v2 schema (v1.6+): { paneCount: 4|6, slots: [PaneSlot of length 6] }.
+    static let userDefaultsKeyV2 = "workspaceLayout.v2"
 
+    /// All six slots, always. `paneCount` controls which are rendered. This
+    /// lets 6→4→6 toggles preserve what was in `.topMid` / `.bottomMid`.
     @Published var slots: [PaneSlot] = WorkspaceLayout.defaultSlots()
+    @Published var paneCount: WorkspacePaneCount = .four
     @Published var maximizedSlotID: UUID? = nil
+
     /// In-memory counter bumped by the 3-dot "Reset shell" / "Restart" menu
     /// items. Folded into the pane view's `spawnIdentity` so that triggering
     /// a reset forces SwiftUI to respawn the underlying process. Not persisted.
@@ -24,14 +33,37 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKey),
-           let decoded = try? JSONDecoder().decode([PaneSlot].self, from: data),
-           decoded.count == 4 {
-            slots = decoded
+        // Prefer v2 if present, else migrate v1.
+        if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV2),
+           let decoded = try? JSONDecoder().decode(PersistedV2.self, from: data),
+           decoded.slots.count == 6 {
+            slots = decoded.slots
+            paneCount = decoded.paneCount
+        } else if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV1),
+                  let decoded = try? JSONDecoder().decode([PaneSlot].self, from: data),
+                  decoded.count == 4 {
+            // Migrate: keep TL/TR/BL/BR; append empty .topMid + .bottomMid.
+            var migrated: [PaneSlot] = []
+            for pos in PaneSlotPosition.sixPaneOrder {
+                if let existing = decoded.first(where: { $0.position == pos }) {
+                    migrated.append(existing)
+                } else {
+                    migrated.append(PaneSlot(position: pos, kind: .empty))
+                }
+            }
+            slots = migrated
+            paneCount = .four
+            persist()
         }
     }
 
     // MARK: - Mutations
+
+    /// Slots visible in the current paneCount, in reading order.
+    var visibleSlots: [PaneSlot] {
+        let positions = paneCount.positions
+        return positions.compactMap { pos in slots.first(where: { $0.position == pos }) }
+    }
 
     func slot(at position: PaneSlotPosition) -> PaneSlot? {
         slots.first(where: { $0.position == position })
@@ -54,7 +86,6 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     func close(_ id: UUID) {
-        // "Close" tears down and swaps the slot to .empty.
         update(id) { $0.kind = .empty; $0.viewState = .normal }
         if maximizedSlotID == id { maximizedSlotID = nil }
     }
@@ -70,6 +101,35 @@ final class WorkspaceLayout: ObservableObject {
     func toggleMaximize(_ id: UUID) {
         maximizedSlotID = (maximizedSlotID == id) ? nil : id
     }
+
+    // MARK: - Pane-count toggle
+
+    /// Switch between 4-pane (2×2) and 6-pane (2×3) layouts. When switching
+    /// 6 → 4 with non-empty `.topMid` / `.bottomMid` slots, the caller
+    /// should first prompt the user (`hiddenSlotsOnFourPane()` describes
+    /// what will be hidden). State for hidden slots is preserved; toggling
+    /// back to 6 restores them.
+    func setPaneCount(_ newCount: WorkspacePaneCount) {
+        guard newCount != paneCount else { return }
+        paneCount = newCount
+        // If we're shrinking and the maximized slot is now hidden, clear it.
+        if newCount == .four,
+           let maxID = maximizedSlotID,
+           let s = slot(withID: maxID),
+           s.position.isSixPaneOnly {
+            maximizedSlotID = nil
+        }
+        persist()
+    }
+
+    /// Returns the non-empty `.topMid` / `.bottomMid` slots that would
+    /// disappear from view on a 6 → 4 toggle. Used by the toolbar to
+    /// decide whether to show a confirm dialog.
+    func slotsHiddenByFourPaneToggle() -> [PaneSlot] {
+        return slots.filter { $0.position.isSixPaneOnly && $0.kind != .empty }
+    }
+
+    // MARK: - Titles
 
     /// Auto-numbered title: "Terminal", "Terminal 2", … when multiple
     /// Terminal slots exist; same auto-numbering for Codex when multiple
@@ -97,18 +157,29 @@ final class WorkspaceLayout: ObservableObject {
 
     // MARK: - Persistence
 
+    /// v2 wire schema.
+    private struct PersistedV2: Codable {
+        var paneCount: WorkspacePaneCount
+        var slots: [PaneSlot]
+    }
+
     private func persist() {
-        if let data = try? JSONEncoder().encode(slots) {
-            UserDefaults.standard.set(data, forKey: Self.userDefaultsKey)
+        let payload = PersistedV2(paneCount: paneCount, slots: slots)
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: Self.userDefaultsKeyV2)
         }
     }
 
+    /// Defaults: 6 slots seeded with reasonable starting kinds for the
+    /// 4-pane positions, and empty for the 6-pane-only positions.
     static func defaultSlots() -> [PaneSlot] {
         [
-            PaneSlot(position: .topLeft, kind: .terminal),
-            PaneSlot(position: .topRight, kind: .claudeCode),
-            PaneSlot(position: .bottomLeft, kind: .terminal),
-            PaneSlot(position: .bottomRight, kind: .browser)
+            PaneSlot(position: .topLeft,     kind: .terminal),
+            PaneSlot(position: .topMid,      kind: .empty),
+            PaneSlot(position: .topRight,    kind: .claudeCode),
+            PaneSlot(position: .bottomLeft,  kind: .terminal),
+            PaneSlot(position: .bottomMid,   kind: .empty),
+            PaneSlot(position: .bottomRight, kind: .browser),
         ]
     }
 }

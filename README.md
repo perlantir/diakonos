@@ -12,10 +12,30 @@ Open source, MIT.
 
 ## Status
 
-v1.5 in active development. Installed locally to `/Applications/Diakonos.app`;
+v1.6 in active development. Installed locally to `/Applications/Diakonos.app`;
 not yet code-signed or notarized.
 
-## What's new in v1.5
+## What's new in v1.6
+
+- **Keyboard pipeline unified.** Every pane (Terminal, Claude Code, Codex,
+  Chat panes, Browser) routes through one classifier and one CDP backend.
+  Fixes Shift+symbol regressions (`!@#$%`…), adds F1-F12, and corrects
+  Option-key diacritics (`é`, `ç`, `´`). Empirically validated 27/27 in
+  `scripts/keyboard_cdp_harness.py`.
+- **Mac ↔ sandbox clipboard.** Cmd+V pastes from your Mac clipboard into a
+  pane's Chromium. Cmd+C / Cmd+X scrape the sandbox selection back to the
+  Mac clipboard. Text only for v1.6; images / rich types are v1.7.
+- **6-pane mode (NEW).** Toolbar 4/6 toggle switches between 2×2 and 2×3
+  layouts. Two new positions: top-mid, bottom-mid. Cmd+1..6 focus shortcuts.
+  State persists across mode toggles and app launches; v1.5 layouts
+  auto-migrate.
+- **Half-landed audit fix.** `EmptyPaneBody`'s dropdown is now derived
+  from `PaneSlotKind.allCases`, so a new pane kind can't silently fail to
+  appear in the picker (the bug class that bit v1.3 and v1.5).
+
+See `Docs/v1.6-spec.md` for architecture details.
+
+## What's in v1.5
 
 - **Browser pane fills the pane.** v1.4 sized chromium small inside a
   fixed-1280×720 cuabot screenshot, leaving 75% black margin. v1.5

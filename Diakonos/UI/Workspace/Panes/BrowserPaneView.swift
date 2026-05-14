@@ -86,6 +86,7 @@ struct BrowserPaneView: View {
             SandboxScreenView(
                 stream: stream,
                 input: input,
+                cdpPort: sandbox.cdpPort,
                 focused: $hasFocus,
                 focusPosition: focusPosition,
                 focusRingColor: NSColor(preferences.accentColor)
@@ -223,12 +224,16 @@ struct BrowserPaneView: View {
 struct SandboxScreenView: NSViewRepresentable {
     @ObservedObject var stream: SandboxStream
     @ObservedObject var input: SandboxInput
+    /// CDP port for the Browser pane's Chromium (9222 inside the cuabot
+    /// container). Keyboard events flow through `CDPInput` on this port —
+    /// v1.6 unified the chat-pane and browser-pane keyboard pipelines.
+    let cdpPort: Int
     @Binding var focused: Bool
     var focusPosition: PaneSlotPosition?
     var focusRingColor: NSColor = NSColor(srgbRed: 47/255, green: 107/255, blue: 1.0, alpha: 1.0)
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(stream: stream, input: input, focused: $focused)
+        Coordinator(stream: stream, input: input, cdpPort: cdpPort, focused: $focused)
     }
 
     func makeNSView(context: Context) -> SandboxScreenNSView {
@@ -252,11 +257,13 @@ struct SandboxScreenView: NSViewRepresentable {
     final class Coordinator {
         let stream: SandboxStream
         let input: SandboxInput
+        let cdpPort: Int
         @Binding var focused: Bool
 
-        init(stream: SandboxStream, input: SandboxInput, focused: Binding<Bool>) {
+        init(stream: SandboxStream, input: SandboxInput, cdpPort: Int, focused: Binding<Bool>) {
             self.stream = stream
             self.input = input
+            self.cdpPort = cdpPort
             self._focused = focused
         }
     }
@@ -385,54 +392,40 @@ final class SandboxScreenNSView: NSView {
         }
     }
 
-    // MARK: - Keyboard forwarding
+    // MARK: - Keyboard forwarding (v1.6 unified pipeline)
+    //
+    // Browser pane and chat panes share the same classifier
+    // (`KeyboardEventTranslator`) and the same CDP backend (`CDPInput`).
+    // The Browser pane targets port 9222 (foreground Chromium on :100);
+    // chat panes target 9223/9224. v1.5 ran Browser keyboard through
+    // xdotool inside the cuabot container, but xdotool wasn't reliably
+    // present and the path drifted from the chat-pane pipeline. Unifying
+    // on CDP closes both gaps.
 
     override func keyDown(with event: NSEvent) {
         guard let coordinator = coordinator else { return super.keyDown(with: event) }
-        if let (keyName, mods) = Self.specialKey(for: event) {
-            Task { @MainActor in await coordinator.input.key(keyName, modifiers: mods) }
-            return
-        }
-        let chars = event.characters ?? ""
-        if !chars.isEmpty {
-            Task { @MainActor in await coordinator.input.type(chars) }
-        }
-    }
-
-    /// Maps macOS key events to xdotool key names. Returns nil for plain
-    /// printable characters (those go through /type).
-    private static func specialKey(for event: NSEvent) -> (String, [String])? {
-        var modifiers: [String] = []
-        let f = event.modifierFlags
-        if f.contains(.command) { modifiers.append("super") }
-        if f.contains(.option)  { modifiers.append("alt") }
-        if f.contains(.control) { modifiers.append("ctrl") }
-        if f.contains(.shift)   { modifiers.append("shift") }
-
-        let key: String?
-        switch Int(event.keyCode) {
-        case 36: key = "Return"        // Return
-        case 53: key = "Escape"
-        case 51: key = "BackSpace"
-        case 117: key = "Delete"
-        case 48: key = "Tab"
-        case 123: key = "Left"
-        case 124: key = "Right"
-        case 125: key = "Down"
-        case 126: key = "Up"
-        case 116: key = "Page_Up"
-        case 121: key = "Page_Down"
-        case 115: key = "Home"
-        case 119: key = "End"
-        default:
-            // If any modifier is set, treat the character as a chord.
-            if !modifiers.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
-                key = chars
-            } else {
-                key = nil
+        let port = coordinator.cdpPort
+        switch KeyboardEventTranslator.classify(event) {
+        case .type(let text):
+            Task { await CDPInput.dispatchType(port: port, text: text) }
+        case .key(let name, let mods):
+            Task { await CDPInput.dispatchKey(port: port, name: name, modifiers: mods) }
+        case .clipboardPaste:
+            Task { @MainActor in
+                await ClipboardBridge.paste(toPort: port)
             }
+        case .clipboardCopy:
+            Task { @MainActor in
+                await ClipboardBridge.copyFromBrowser(port: port)
+                await CDPInput.dispatchKey(port: port, name: "c", modifiers: ["super"])
+            }
+        case .clipboardCut:
+            Task { @MainActor in
+                await ClipboardBridge.copyFromBrowser(port: port)
+                await CDPInput.dispatchKey(port: port, name: "x", modifiers: ["super"])
+            }
+        case .ignore:
+            break
         }
-        guard let k = key else { return nil }
-        return (k, modifiers)
     }
 }

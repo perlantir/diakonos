@@ -1,10 +1,44 @@
 import Foundation
 
-/// One of the four physical pane positions in the 2x2 grid.
+/// One of the physical pane positions in the workspace grid. v1.6 added
+/// `.topMid` and `.bottomMid` to support a 3-column (6-pane) layout. The
+/// default mode is still 4-pane (`.topLeft`, `.topRight`, `.bottomLeft`,
+/// `.bottomRight`); when the user toggles to 6-pane, `.topMid` and
+/// `.bottomMid` slots become visible. The raw values are stable so on-disk
+/// persistence (UserDefaults) survives mode toggles.
 enum PaneSlotPosition: String, Codable, CaseIterable, Identifiable {
-    case topLeft, topRight, bottomLeft, bottomRight
+    case topLeft, topMid, topRight, bottomLeft, bottomMid, bottomRight
 
     var id: String { rawValue }
+
+    /// The 4-pane reading order: TL, TR, BL, BR.
+    static var fourPaneOrder: [PaneSlotPosition] {
+        [.topLeft, .topRight, .bottomLeft, .bottomRight]
+    }
+    /// The 6-pane reading order: TL, TM, TR, BL, BM, BR. Cmd+N maps to
+    /// position N-1 in this list when 6-pane mode is active.
+    static var sixPaneOrder: [PaneSlotPosition] {
+        [.topLeft, .topMid, .topRight, .bottomLeft, .bottomMid, .bottomRight]
+    }
+    /// True when this position is only visible in 6-pane mode.
+    var isSixPaneOnly: Bool {
+        self == .topMid || self == .bottomMid
+    }
+}
+
+/// Number of visible panes in the workspace. Default 4. Toggled via the
+/// toolbar 4/6 control. Codable raw values let the enum live directly in
+/// UserDefaults.
+enum WorkspacePaneCount: Int, Codable, CaseIterable {
+    case four = 4
+    case six  = 6
+
+    var toggled: WorkspacePaneCount {
+        self == .four ? .six : .four
+    }
+    var positions: [PaneSlotPosition] {
+        self == .four ? PaneSlotPosition.fourPaneOrder : PaneSlotPosition.sixPaneOrder
+    }
 }
 
 /// What the user has assigned to this slot. Empty means the slot is in the
@@ -19,6 +53,23 @@ enum PaneSlotKind: String, Codable, CaseIterable, Identifiable {
     case browser
 
     var id: String { rawValue }
+
+    /// User-selectable kinds for the EmptyPaneBody dropdown. Derived from
+    /// `allCases` so adding a new case automatically surfaces it in the UI
+    /// — this kills the "half-landed audit" bug class that bit v1.3 and
+    /// v1.5. Order is the stable display order; not alphabetical.
+    static var userSelectable: [PaneSlotKind] {
+        let order: [PaneSlotKind] = [.terminal, .claudeCode, .codex, .browser, .claudeChat, .chatgptChat]
+        // Defensive: if a new case is added to PaneSlotKind but not to the
+        // order array, append it at the end so it still shows up.
+        let known = Set(order)
+        let missing = allCases.filter { $0 != .empty && !known.contains($0) }
+        #if DEBUG
+        assert(missing.isEmpty,
+               "PaneSlotKind case(s) missing from userSelectable order: \(missing). Add to PaneSlotKind.userSelectable.")
+        #endif
+        return order + missing
+    }
 
     var dropdownLabel: String {
         switch self {

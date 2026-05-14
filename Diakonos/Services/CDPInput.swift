@@ -49,12 +49,26 @@ enum CDPInput {
         await runPython(py)
     }
 
+    /// Dispatch printable text as a sequence of CDP `Input.dispatchKeyEvent
+    /// type:'char'` events, one per character. The whole string is sent in
+    /// a single Python invocation (single cuabot /bash round-trip) — v1.5
+    /// shipped the same shape, v1.6 hardens escaping (handles backslash,
+    /// double-quote, newline, carriage return, tab, plus standalone CR).
+    ///
+    /// Each char is sent as its own keyDown event with `type:'char'` because
+    /// Chromium fires `input` events on dispatchKeyEvent only when the
+    /// `text` field is set, which `'char'` events do. Sending the whole
+    /// string at once via Runtime.evaluate + execCommand was considered but
+    /// rejected: it bypasses React's onChange in some flows.
     static func dispatchType(port: Int, text: String) async {
-        let escaped = text.replacingOccurrences(of: "\\", with: "\\\\")
-                          .replacingOccurrences(of: "\"", with: "\\\"")
-                          .replacingOccurrences(of: "\n", with: "\\n")
+        guard !text.isEmpty else { return }
+        // We base64-encode the payload so the bash + Swift + Python
+        // quoting layers don't have to agree on character-by-character
+        // escaping. Python reads the bytes back and decodes UTF-8.
+        let b64 = Data(text.utf8).base64EncodedString()
         let py = """
-        import json, urllib.request, asyncio
+        import json, base64, urllib.request, asyncio
+        TEXT = base64.b64decode('\(b64)').decode('utf-8')
         async def main():
             try: import websockets
             except Exception: print('NO_WS'); return
@@ -62,8 +76,8 @@ enum CDPInput {
             tabs = [t for t in json.loads(data) if t.get('type')=='page']
             if not tabs: return
             async with websockets.connect(tabs[0]['webSocketDebuggerUrl'], ping_interval=None) as ws:
-                for ch in "\(escaped)":
-                    await ws.send(json.dumps({'id':1,'method':'Input.dispatchKeyEvent','params':{'type':'char','text':ch}}))
+                for i, ch in enumerate(TEXT):
+                    await ws.send(json.dumps({'id': 100+i, 'method':'Input.dispatchKeyEvent', 'params':{'type':'char','text':ch}}))
                     await ws.recv()
         asyncio.run(main())
         """
@@ -82,7 +96,10 @@ enum CDPInput {
             default: break
             }
         }
-        let mapping: [String: (key: String, code: String, kc: Int)] = [
+        // Map of `KeyboardEventTranslator` name → (CDP `key`, `code`,
+        // `windowsVirtualKeyCode`). The named-special table here MUST stay
+        // in sync with `KeyboardEventTranslator.namedKey(forKeyCode:)`.
+        var mapping: [String: (key: String, code: String, kc: Int)] = [
             "Return":    ("Enter",      "Enter",      13),
             "Tab":       ("Tab",        "Tab",         9),
             "Escape":    ("Escape",     "Escape",     27),
@@ -97,12 +114,42 @@ enum CDPInput {
             "Page_Up":   ("PageUp",     "PageUp",     33),
             "Page_Down": ("PageDown",   "PageDown",   34)
         ]
+        // F1 .. F12 — CDP key is `F1`, code is `F1`, virtual keycode is 111+n.
+        for n in 1...12 {
+            mapping["F\(n)"] = ("F\(n)", "F\(n)", 111 + n)
+        }
         let key, code: String
         let kc: Int
         if let m = mapping[name] {
             key = m.key; code = m.code; kc = m.kc
+        } else if name.count == 1, let scalar = name.unicodeScalars.first {
+            // Single-char chord (e.g., Cmd+V). CDP needs both `key` and
+            // `code`. Letters: code = "KeyA".."KeyZ"; digits: code =
+            // "Digit0".."Digit9". virtualKeyCode is the ASCII-uppercase
+            // ordinal — Chromium's shortcut router matches on this.
+            key = String(scalar).lowercased()
+            if scalar.isASCII {
+                let char = Character(scalar)
+                if char.isLetter {
+                    let upperStr = String(scalar).uppercased()
+                    code = "Key\(upperStr)"
+                    kc = Int((upperStr.unicodeScalars.first?.value) ?? 0)
+                } else if char.isNumber {
+                    code = "Digit\(String(scalar))"
+                    kc = Int(scalar.value)
+                } else {
+                    code = String(scalar)
+                    kc = Int(scalar.value)
+                }
+            } else {
+                code = String(scalar)
+                kc = Int(scalar.value)
+            }
         } else {
-            key = name; code = name; kc = Int(name.unicodeScalars.first?.value ?? 0)
+            // Unknown multi-char name. Send as-is; Chromium will likely
+            // ignore the event but we don't synthesize behavior we can't
+            // verify.
+            key = name; code = name; kc = 0
         }
         let py = """
         import json, urllib.request, asyncio

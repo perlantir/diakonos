@@ -10,7 +10,10 @@ struct EmptyPaneBody: View {
 
     @State private var hovering = false
 
-    private let kinds: [PaneSlotKind] = [.terminal, .claudeCode, .codex, .browser, .claudeChat, .chatgptChat]
+    /// User-selectable kinds. Sourced from `PaneSlotKind.userSelectable` so
+    /// adding a new case to `PaneSlotKind` automatically surfaces it here
+    /// — kills the v1.3 + v1.5 "half-landed audit" bug class.
+    private let kinds: [PaneSlotKind] = PaneSlotKind.userSelectable
 
     var body: some View {
         VStack(spacing: DesignTokens.Spacing.s4) {

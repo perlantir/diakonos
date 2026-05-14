@@ -54,8 +54,10 @@ struct PanesSection: View {
     private func positionLabel(for position: PaneSlotPosition) -> String {
         switch position {
         case .topLeft:     return "Top-left"
+        case .topMid:      return "Top-mid"
         case .topRight:    return "Top-right"
         case .bottomLeft:  return "Bottom-left"
+        case .bottomMid:   return "Bottom-mid"
         case .bottomRight: return "Bottom-right"
         }
     }

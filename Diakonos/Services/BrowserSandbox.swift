@@ -18,7 +18,10 @@ final class BrowserSandbox: ObservableObject {
     @Published private(set) var statusMessage: String = ""
 
     private let port: Int = 7842
-    private let cdpPort: Int = 9222   // inside the container
+    /// CDP port (inside the cuabot container) for the foreground Chromium
+    /// the Browser pane drives. Exposed so the pane's `keyDown` handler can
+    /// route keyboard events through `CDPInput` instead of xdotool.
+    let cdpPort: Int = 9222
     private var process: Process?
     private var pollingTask: Task<Void, Never>?
     private var navHelperInstalled = false

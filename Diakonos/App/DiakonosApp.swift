@@ -24,30 +24,17 @@ struct DiakonosApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
 
+            // v1.6: Cmd+1..6 broadcast a 1-based index. WorkspaceView
+            // resolves the index against the current pane count's reading
+            // order (4: TL/TR/BL/BR; 6: TL/TM/TR/BL/BM/BR). Slots 5 and 6
+            // are inactive while in 4-pane mode.
             CommandMenu("Pane") {
-                Button("Focus Terminal") {
-                    NotificationCenter.default.post(name: .diakonosFocusSlot,
-                                                    object: PaneSlotPosition.topLeft.rawValue)
-                }
-                .keyboardShortcut("1", modifiers: .command)
-
-                Button("Focus Claude Code") {
-                    NotificationCenter.default.post(name: .diakonosFocusSlot,
-                                                    object: PaneSlotPosition.topRight.rawValue)
-                }
-                .keyboardShortcut("2", modifiers: .command)
-
-                Button("Focus Bottom-Left Pane") {
-                    NotificationCenter.default.post(name: .diakonosFocusSlot,
-                                                    object: PaneSlotPosition.bottomLeft.rawValue)
-                }
-                .keyboardShortcut("3", modifiers: .command)
-
-                Button("Focus Browser") {
-                    NotificationCenter.default.post(name: .diakonosFocusSlot,
-                                                    object: PaneSlotPosition.bottomRight.rawValue)
-                }
-                .keyboardShortcut("4", modifiers: .command)
+                paneFocusButton(label: "Focus Pane 1", index: 1, key: "1")
+                paneFocusButton(label: "Focus Pane 2", index: 2, key: "2")
+                paneFocusButton(label: "Focus Pane 3", index: 3, key: "3")
+                paneFocusButton(label: "Focus Pane 4", index: 4, key: "4")
+                paneFocusButton(label: "Focus Pane 5 (6-pane only)", index: 5, key: "5")
+                paneFocusButton(label: "Focus Pane 6 (6-pane only)", index: 6, key: "6")
             }
         }
 
@@ -56,5 +43,13 @@ struct DiakonosApp: App {
                 .preferredColorScheme(preferences.colorScheme)
                 .tint(preferences.accentColor)
         }
+    }
+
+    @ViewBuilder
+    private func paneFocusButton(label: String, index: Int, key: KeyEquivalent) -> some View {
+        Button(label) {
+            NotificationCenter.default.post(name: .diakonosFocusIndex, object: index)
+        }
+        .keyboardShortcut(key, modifiers: .command)
     }
 }
