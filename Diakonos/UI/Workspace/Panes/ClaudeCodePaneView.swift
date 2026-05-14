@@ -29,9 +29,18 @@ struct ClaudeCodePaneView: View {
             onSpawn: { term in
                 MCPRegistration.shared.ensureClaudeRegistered()
                 guard claudeAutoTrustEnabled else { return }
+                // v1.7 Part B: split '1' and Enter with an explicit wait
+                // so the terminal emulator sees them as two distinct
+                // input events. v1.5 sent "1\r" as a single byte buffer,
+                // which occasionally garbled when the trust prompt was
+                // still painting. Send '1' at 1.5s, Enter at 1.7s.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    let bytes: [UInt8] = Array("1\r".utf8)
-                    term.process.send(data: bytes[...])
+                    let one: [UInt8] = Array("1".utf8)
+                    term.process.send(data: one[...])
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        let enter: [UInt8] = Array("\r".utf8)
+                        term.process.send(data: enter[...])
+                    }
                 }
             }
         )

@@ -132,6 +132,15 @@ final class WorkspaceLayout: ObservableObject {
         update(id) { $0.mode = mode }
     }
 
+    /// Set the postback mode for a slot. Used by the postback chip in
+    /// chat-pane headers. Switching INTO `.fullAuto` does NOT bypass
+    /// the per-conversation first-route confirm modal — that's the
+    /// (a) safeguard. Switching OUT of `.fullAuto` is what the Stop
+    /// button calls.
+    func setPostback(_ id: UUID, postback: PostbackMode) {
+        update(id) { $0.postback = postback }
+    }
+
     func close(_ id: UUID) {
         update(id) { $0.kind = .empty; $0.viewState = .normal }
         if maximizedSlotID == id { maximizedSlotID = nil }

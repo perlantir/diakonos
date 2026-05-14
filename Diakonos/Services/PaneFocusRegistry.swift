@@ -26,13 +26,28 @@ final class PaneFocusRegistry: ObservableObject {
 
     /// Focus the slot at position. Returns true if a view was found and asked
     /// to become first responder.
+    ///
+    /// v1.7 Part B: logs to NSLog when focus fails so Nick can debug why
+    /// Cmd+5 / Cmd+6 don't move focus in some 6-pane layouts. Common
+    /// causes: (1) slot at that position is `.empty` (no view registers
+    /// from EmptyPaneBody) — toggle to a real pane kind; (2) view was
+    /// registered but is no longer in a window (weak ref).
     @discardableResult
     func focus(_ position: PaneSlotPosition) -> Bool {
-        guard let view = registry[position]?.view, let window = view.window else {
+        guard let view = registry[position]?.view else {
+            NSLog("[Diakonos] PaneFocusRegistry.focus(\(position.rawValue)) — no view registered (slot likely .empty)")
+            return false
+        }
+        guard let window = view.window else {
+            NSLog("[Diakonos] PaneFocusRegistry.focus(\(position.rawValue)) — registered view has no window (panes torn down?)")
             return false
         }
         window.makeKeyAndOrderFront(nil)
-        return window.makeFirstResponder(view)
+        let made = window.makeFirstResponder(view)
+        if !made {
+            NSLog("[Diakonos] PaneFocusRegistry.focus(\(position.rawValue)) — makeFirstResponder returned false")
+        }
+        return made
     }
 }
 

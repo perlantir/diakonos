@@ -17,6 +17,10 @@ final class Preferences: ObservableObject {
     @AppStorage("browserHomeURL") var browserHomeURL: String = "https://duckduckgo.com"
     @AppStorage("claudeCodeFolderPath") var claudeCodeFolderPath: String = ""
     @AppStorage("codexFolderPath") var codexFolderPath: String = ""
+    /// v1.7 Part B: max round-trips before Full Auto pauses and
+    /// reverts the pane to Manual. Hard ceiling — the user always
+    /// has to re-engage to keep an autonomous loop alive.
+    @AppStorage("fullAutoMaxTurns") var fullAutoMaxTurns: Int = 10
 
     var appearance: Appearance {
         get { Appearance(rawValue: appearanceRaw) ?? .system }

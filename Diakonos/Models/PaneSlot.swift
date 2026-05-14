@@ -117,21 +117,34 @@ struct PaneSlot: Identifiable, Codable, Equatable {
     /// Stored separately so reassigning the slot's kind also resets to the
     /// new kind's default mode unless the user has explicitly chosen one.
     var mode: PaneMode?
+    /// v1.7 Part B: postback mode. Manual = default = no auto-Send +
+    /// no assistant trigger scrape. AutoSend = auto-press Send.
+    /// FullAuto = autonomous loop with safeguards.
+    var postback: PostbackMode?
 
     init(id: UUID = UUID(),
          position: PaneSlotPosition,
          kind: PaneSlotKind,
          viewState: PaneSlotViewState = .normal,
-         mode: PaneMode? = nil) {
+         mode: PaneMode? = nil,
+         postback: PostbackMode? = nil) {
         self.id = id
         self.position = position
         self.kind = kind
         self.viewState = viewState
         self.mode = mode
+        self.postback = postback
     }
 
     /// Resolved mode: explicit `mode` if set, else the kind's default.
     var resolvedMode: PaneMode {
         mode ?? PaneMode.defaultMode(for: kind)
+    }
+
+    /// Resolved postback mode. Always defaults to `.manual` — the
+    /// safe baseline. User opts into `.autoSend` / `.fullAuto` via
+    /// the header chip.
+    var resolvedPostback: PostbackMode {
+        postback ?? .manual
     }
 }

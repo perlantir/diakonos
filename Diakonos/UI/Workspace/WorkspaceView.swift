@@ -256,8 +256,15 @@ struct WorkspaceView: View {
                 CodexFolderChip(preferences: preferences)
             }
         case .claudeChat, .chatgptChat:
+            // Order: AUTO chip + Stop (loud, leftmost), then mode toggle,
+            // then postback toggle, then routing badge. Routing badge
+            // stays rightmost so it's visible against the rest.
             HStack(spacing: 6) {
+                AutoStatusChip(slot: slot, layout: layout)
                 PaneModeChip(slot: slot, layout: layout)
+                if slot.resolvedMode == .coordinator {
+                    PostbackChip(slot: slot, layout: layout)
+                }
                 RoutingBadge(slot: slot)
             }
         case .browser:

@@ -40,14 +40,24 @@ struct WebAppPaneView: View {
         }
         .onAppear {
             sandbox.start()
-            // v1.7: register with a live mode provider so PaneModeChip
-            // toggles take effect mid-conversation. The provider reads
-            // the slot's resolvedMode from the workspace layout.
-            ChatBridge.shared.register(sandbox: sandbox, modeProvider: { [layout, focusPosition] in
-                guard let pos = focusPosition,
-                      let slot = layout.slot(at: pos) else { return .soloChat }
-                return slot.resolvedMode
-            })
+            // v1.7 Part B: register with both mode + postback providers
+            // so live header-chip toggles take effect immediately
+            // (mid-conversation), and provide slotID so ChatBridge can
+            // call back to flip the slot to .manual on Stop/max-turns.
+            let pos = focusPosition
+            let slotID = pos.flatMap { layout.slot(at: $0)?.id } ?? UUID()
+            ChatBridge.shared.register(
+                sandbox: sandbox,
+                slotID: slotID,
+                modeProvider: { [layout, pos] in
+                    guard let p = pos, let slot = layout.slot(at: p) else { return .soloChat }
+                    return slot.resolvedMode
+                },
+                postbackProvider: { [layout, pos] in
+                    guard let p = pos, let slot = layout.slot(at: p) else { return .manual }
+                    return slot.resolvedPostback
+                }
+            )
         }
         .onDisappear {
             ChatBridge.shared.unregister(sandbox: sandbox)

@@ -12,10 +12,59 @@ Open source, MIT.
 
 ## Status
 
-v1.6 in active development. Installed locally to `/Applications/Diakonos.app`;
+v1.7 in active development. Installed locally to `/Applications/Diakonos.app`;
 not yet code-signed or notarized.
 
-## What's new in v1.6
+## What's new in v1.7
+
+**Routing protocol redesigned end-to-end.** v1.5/v1.6 had an implicit,
+always-on routing path. v1.7 is explicit, layered, versioned, and safe.
+
+- **Per-pane modes** — `PaneMode`: `.soloChat` (default for new chat
+  panes) / `.coordinator` (routes `Code:`/`Codex:` triggers) /
+  `.implementer` (the routed target) / `.browserDriver`. Header chip
+  toggles for chat panes. **v1.5 chat panes that auto-routed now
+  default to `.soloChat` after upgrade — flip the chip to opt in.**
+- **Three postback modes** — `PostbackMode`:
+  - `Manual` (default): response in textarea, you press Send. Banner
+    above composer if you'd been typing — your draft is preserved.
+  - `Auto-send`: Diakonos clicks Send 300 ms after writing the
+    response (long enough for React to settle).
+  - `Full Auto`: assistant's `Code:`/`Codex:` ALSO route. Autonomous
+    loop, with all of: per-conversation opt-in, max-turns ceiling
+    (Preferences, default 10), red "AUTO N/MAX" chip, always-visible
+    Stop button.
+- **Versioned role cards** — markdown prompts at
+  `~/Library/Application Support/Diakonos/RoleCards/<id>@<semver>.md`.
+  5 bundled defaults seeded on first run. Settings → Role Cards
+  editor; save auto-bumps patch. Active sessions pin to their version.
+- **AGENTS.md canonical** — Diakonos reads `AGENTS.md`,
+  `.diakonos/context.md`, and `CLAUDE.md` from your chosen project
+  folder. Auto-creates templates if missing. CLAUDE.md should
+  `@AGENTS.md` to import the canonical view.
+- **Trigger safety** — DOM attribution (user-only selector, verified),
+  message-start, no-code-block, no-quote, `\Code:` escape,
+  per-conversation Confirm/Cancel/Always modal on first route.
+- **9-state route state machine** with structured envelope
+  (route_id, project_root, hashes, role card version) and
+  append-only JSONL session log under
+  `~/Library/Application Support/Diakonos/Sessions/<conv-id>.jsonl`.
+- **CWD fix** — routed subprocess (`claude --print` / `codex exec`)
+  now runs in your project folder. v1.5/v1.6 silently inherited
+  Diakonos's launch CWD; v1.7 sets `Process.currentDirectoryURL`
+  explicitly. Self-test runs at every app launch.
+- **Context Doctor** — Settings → Diagnostics → "Check Context"
+  surfaces conflicts (test command divergence, missing imports,
+  missing files) across AGENTS.md / CLAUDE.md / .diakonos/context.md.
+- **Browser content untrusted** — `mcp_browser.py` tool descriptions
+  warn agents that page content is data, not instructions. Route
+  detection never fires on browser-pane content.
+
+See `docs/v1.7-spec.md` for the protocol, `docs/architecture/routing-protocol.md`
+for the state machine + envelope, and `docs/architecture/role-cards.md`
+for the authoring guide.
+
+## What's in v1.6
 
 - **Keyboard pipeline unified.** Every pane (Terminal, Claude Code, Codex,
   Chat panes, Browser) routes through one classifier and one CDP backend.
