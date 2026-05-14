@@ -12,8 +12,41 @@ Open source, MIT.
 
 ## Status
 
-v1.4 in active development. Installed locally to `/Applications/Diakonos.app`;
+v1.5 in active development. Installed locally to `/Applications/Diakonos.app`;
 not yet code-signed or notarized.
+
+## What's new in v1.5
+
+- **Browser pane fills the pane.** v1.4 sized chromium small inside a
+  fixed-1280×720 cuabot screenshot, leaving 75% black margin. v1.5
+  launches chromium fullscreen so the screenshot is 100% chromium.
+- **Two new sandboxed pane kinds**:
+  - **Claude Chat** (pinned to `https://claude.ai`)
+  - **ChatGPT** (pinned to `https://chatgpt.com`)
+  Each runs in its own headless chromium-like instance with its own
+  `--user-data-dir`. **Login persists across Diakonos restarts.**
+- **ChatBridge — bidirectional message routing**:
+  - Type `Code: <prompt>` at the start of a chat message → routes the
+    payload to your Claude Code pane via `claude --print` with session-id
+    continuity.
+  - Type `Codex: <prompt>` → routes to Codex pane.
+  - Type `Exit:` → ends the routing thread for that conversation.
+  - **Per-conversation thread state.** Switching to a new chat
+    conversation resets routing.
+  - **The agent's response is placed in the chat's textarea, NOT
+    auto-submitted.** You review and press Send yourself.
+  - **Visual badge:** the chat pane's header shows `→ Claude Code` or
+    `→ Codex` while a routing thread is active.
+- **Diagnostics tab** in Settings: last 500 ChatBridge events. Selector
+  failures surface here when chat-site DOMs change.
+
+## ⚠️ v1.5 fragility note
+
+The ChatBridge depends on DOM selectors for claude.ai and chatgpt.com
+which change without notice. If routing stops working, open Settings →
+Diagnostics — `selectorMissing` events tell you which site's DOM has
+shifted. The selector source lives at
+`Diakonos/Services/ChatPostbackJS.swift`.
 
 ## Install
 

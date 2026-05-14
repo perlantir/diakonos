@@ -143,6 +143,10 @@ struct WorkspaceView: View {
                 focusPosition: slot.position,
                 respawnTag: layout.respawnTag(slot.id)
             )
+        case .claudeChat:
+            WebAppPaneView(kind: .claudeChat, focusPosition: slot.position)
+        case .chatgptChat:
+            WebAppPaneView(kind: .chatgptChat, focusPosition: slot.position)
         case .browser:
             BrowserPaneView(focusPosition: slot.position)
         }
@@ -155,6 +159,8 @@ struct WorkspaceView: View {
             ClaudeCodeFolderChip(preferences: preferences)
         case .codex:
             CodexFolderChip(preferences: preferences)
+        case .claudeChat, .chatgptChat:
+            RoutingBadge(slot: slot)
         default:
             EmptyView()
         }
@@ -190,6 +196,12 @@ struct WorkspaceView: View {
                 // codex itself surface the OAuth flow if not signed in.
                 layout.bumpRespawn(slot.id)
             }
+        case .claudeChat:
+            Button("Sign in to Claude…") {
+                // navigates to https://claude.ai which prompts login
+            }
+        case .chatgptChat:
+            Button("Sign in to ChatGPT…") { }
         case .browser:
             Button("Reload") {
                 NotificationCenter.default.post(name: .diakonosBrowserReload, object: slot.position.rawValue)
@@ -206,11 +218,13 @@ struct WorkspaceView: View {
 
     private func accentFor(slot: PaneSlot) -> Color {
         switch slot.kind {
-        case .empty:      return DesignTokens.Palette.textMuted
-        case .terminal:   return DesignTokens.Palette.statusHealthy
-        case .claudeCode: return Color(hex: 0x8B5CF6)
-        case .codex:      return Color(hex: 0x10A37F)
-        case .browser:    return preferences.accentColor
+        case .empty:       return DesignTokens.Palette.textMuted
+        case .terminal:    return DesignTokens.Palette.statusHealthy
+        case .claudeCode:  return Color(hex: 0x8B5CF6)
+        case .codex:       return Color(hex: 0x10A37F)
+        case .claudeChat:  return Color(hex: 0xCC785C)   // Anthropic warm tan
+        case .chatgptChat: return Color(hex: 0x10A37F)   // OpenAI green
+        case .browser:     return preferences.accentColor
         }
     }
 

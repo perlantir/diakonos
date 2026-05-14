@@ -76,16 +76,13 @@ final class WorkspaceLayout: ObservableObject {
     /// Codex slots exist; otherwise just the kind's default label.
     func title(for slot: PaneSlot) -> String {
         switch slot.kind {
-        case .empty:
-            return "Choose pane type"
-        case .terminal:
-            return autoNumberedTitle(for: slot, kind: .terminal, base: "Terminal")
-        case .claudeCode:
-            return "Claude Code"
-        case .codex:
-            return autoNumberedTitle(for: slot, kind: .codex, base: "Codex")
-        case .browser:
-            return "Browser"
+        case .empty:       return "Choose pane type"
+        case .terminal:    return autoNumberedTitle(for: slot, kind: .terminal, base: "Terminal")
+        case .claudeCode:  return "Claude Code"
+        case .codex:       return autoNumberedTitle(for: slot, kind: .codex, base: "Codex")
+        case .claudeChat:  return "Claude Chat"
+        case .chatgptChat: return "ChatGPT"
+        case .browser:     return "Browser"
         }
     }
 

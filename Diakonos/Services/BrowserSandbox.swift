@@ -155,15 +155,27 @@ final class BrowserSandbox: ObservableObject {
     /// Make sure Chromium is running inside the sandbox with CDP enabled.
     /// Cheap idempotent check: if `curl localhost:9222/json` doesn't return
     /// an array, spawn chromium.
+    ///
+    /// v1.5: --start-fullscreen so chromium fills the X display from launch,
+    /// and after a brief delay we explicitly tell the window manager to
+    /// fullscreen the window (covers the cases where --start-fullscreen
+    /// didn't take effect). cuabot's /screenshot always returns 1280×720;
+    /// chromium must fill the X display so the screenshot is all chromium
+    /// instead of black margin (this was the v1.4 sizing bug).
     private func ensureChromium() async {
         let probe = "curl -s --max-time 1 -o /dev/null -w '%{http_code}' http://localhost:\(cdpPort)/json"
         let resp = await postBashCapturing(probe)
-        if resp.contains("200") { return }
+        if resp.contains("200") {
+            // Already running — re-assert fullscreen idempotently.
+            await postBash("DISPLAY=:100 wmctrl -r Chromium -b add,fullscreen 2>/dev/null || true")
+            return
+        }
 
         // Launch chromium on :100 with CDP and skip first-run prompts.
         let cmd = """
         DISPLAY=:100 setsid chromium --no-sandbox --no-first-run \
             --no-default-browser-check --disable-translate \
+            --start-fullscreen --start-maximized \
             --remote-debugging-port=\(cdpPort) \
             --remote-debugging-address=127.0.0.1 \
             > /tmp/diakonos-chromium.log 2>&1 &
@@ -171,6 +183,9 @@ final class BrowserSandbox: ObservableObject {
         await postBash(cmd)
         // Give Chromium a moment to come up before the next /bash call hits it.
         try? await Task.sleep(nanoseconds: 1_200_000_000)
+        // Re-assert fullscreen — --start-fullscreen flag is sometimes
+        // ignored when there's no window manager hint set yet.
+        await postBash("DISPLAY=:100 wmctrl -r Chromium -b add,fullscreen 2>/dev/null || true")
     }
 
     /// Drop a tiny Python script into /tmp/diakonos-nav.py that uses
@@ -296,38 +311,22 @@ final class BrowserSandbox: ObservableObject {
                     if idx < len(entries) - 1:
                         await send(ws, 'Page.navigateToHistoryEntry', {'entryId': entries[idx+1]['id']}, 2)
                 elif action == 'resize':
-                    try:
-                        w_s, h_s = arg.split('x', 1)
-                        w, h = int(w_s), int(h_s)
-                    except Exception:
-                        print('HELPER_FAILED: bad resize arg'); await ws.close(); return 1
-                    # 1) Switch the X display to the closest available mode.
-                    mode_name, mw, mh = closest_mode(w, h)
+                    # v1.5 fix: cuabot's /screenshot returns a fixed 1280x720
+                    # regardless of the X display size, so shrinking xrandr +
+                    # setWindowBounds (the v1.4 approach) made chromium small
+                    # while the screenshot stayed 1280x720 → 25% fill.
+                    #
+                    # Real fix: force chromium to fullscreen so it fills the
+                    # entire X display, and cuabot's screenshot is 100%
+                    # chromium content. We ignore `arg` (target size) — the
+                    # screenshot is fixed-size, the pane handles aspect-fit
+                    # rendering on the Mac side.
                     env = os.environ.copy(); env['DISPLAY'] = ':100'
-                    subprocess.run(['xrandr', '--output', 'screen', '--mode', mode_name],
+                    subprocess.run(['wmctrl', '-r', 'Chromium', '-b', 'add,fullscreen'],
                                    check=False, env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    timeout=4)
-                    # Clamp Chromium target to the chosen display size.
-                    cw = min(w, mw); ch = min(h, mh)
-                    # 2) Browser.setWindowBounds via CDP.
-                    target_id = tab.get('id') or tab.get('targetId')
-                    if target_id:
-                        gw = await send(ws, 'Browser.getWindowForTarget', {'targetId': target_id}, 2)
-                        try:
-                            window_id = json.loads(gw)['result']['windowId']
-                            await send(ws, 'Browser.setWindowBounds',
-                                       {'windowId': window_id,
-                                        'bounds': {'left': 0, 'top': 0, 'width': cw, 'height': ch,
-                                                   'windowState': 'normal'}}, 3)
-                        except Exception as e:
-                            pass  # fall through to wmctrl
-                    # 3) wmctrl to reposition+resize. Matches any Chromium-titled window.
-                    subprocess.run(['wmctrl', '-r', 'Chromium', '-e', f'0,0,0,{cw},{ch}'],
-                                   check=False, env=env,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   timeout=4)
-                    subprocess.run(['wmctrl', '-r', 'Google', '-e', f'0,0,0,{cw},{ch}'],
+                    subprocess.run(['wmctrl', '-r', 'Google', '-b', 'add,fullscreen'],
                                    check=False, env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    timeout=4)

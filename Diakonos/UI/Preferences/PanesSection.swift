@@ -62,11 +62,13 @@ struct PanesSection: View {
 
     private func accent(for kind: PaneSlotKind) -> Color {
         switch kind {
-        case .empty:      return DesignTokens.Palette.textMuted
-        case .terminal:   return DesignTokens.Palette.statusHealthy
-        case .claudeCode: return Color(hex: 0x8B5CF6)
-        case .codex:      return Color(hex: 0x10A37F)
-        case .browser:    return preferences.accentColor
+        case .empty:       return DesignTokens.Palette.textMuted
+        case .terminal:    return DesignTokens.Palette.statusHealthy
+        case .claudeCode:  return Color(hex: 0x8B5CF6)
+        case .codex:       return Color(hex: 0x10A37F)
+        case .claudeChat:  return Color(hex: 0xCC785C)
+        case .chatgptChat: return Color(hex: 0x10A37F)
+        case .browser:     return preferences.accentColor
         }
     }
 }

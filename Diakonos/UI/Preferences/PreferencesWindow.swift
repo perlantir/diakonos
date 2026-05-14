@@ -1,25 +1,27 @@
 import SwiftUI
 
 enum PreferenceTab: String, CaseIterable, Identifiable, Hashable {
-    case general, panes, shortcuts, about
+    case general, panes, shortcuts, diagnostics, about
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .general:   return "General"
-        case .panes:     return "Panes"
-        case .shortcuts: return "Shortcuts"
-        case .about:     return "About"
+        case .general:     return "General"
+        case .panes:       return "Panes"
+        case .shortcuts:   return "Shortcuts"
+        case .diagnostics: return "Diagnostics"
+        case .about:       return "About"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .general:   return "gearshape"
-        case .panes:     return "square.grid.2x2"
-        case .shortcuts: return "command"
-        case .about:     return "info.circle"
+        case .general:     return "gearshape"
+        case .panes:       return "square.grid.2x2"
+        case .shortcuts:   return "command"
+        case .diagnostics: return "waveform"
+        case .about:       return "info.circle"
         }
     }
 }
@@ -62,10 +64,11 @@ struct PreferencesWindow: View {
     @ViewBuilder
     private var detailContent: some View {
         switch selection {
-        case .general:   GeneralSection(preferences: preferences)
-        case .panes:     PanesSection(preferences: preferences)
-        case .shortcuts: ShortcutsSection()
-        case .about:     AboutSection()
+        case .general:     GeneralSection(preferences: preferences)
+        case .panes:       PanesSection(preferences: preferences)
+        case .shortcuts:   ShortcutsSection()
+        case .diagnostics: DiagnosticsSection()
+        case .about:       AboutSection()
         }
     }
 }
