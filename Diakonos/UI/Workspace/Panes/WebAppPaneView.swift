@@ -234,7 +234,11 @@ final class ChatScreenNSView: NSView {
         case 115: name = "Home"
         case 119: name = "End"
         default:
-            if !mods.isEmpty, let c = event.charactersIgnoringModifiers, !c.isEmpty {
+            // Only route through dispatchKey for control combos (Cmd+/Ctrl+/Opt+).
+            // Plain shifted characters (Shift+2 → @) go through dispatchType so
+            // Chromium gets the right printable char.
+            let controlMods = f.contains(.command) || f.contains(.control) || f.contains(.option)
+            if controlMods, let c = event.charactersIgnoringModifiers, !c.isEmpty {
                 name = c
             } else { name = nil }
         }

@@ -10,7 +10,7 @@ struct EmptyPaneBody: View {
 
     @State private var hovering = false
 
-    private let kinds: [PaneSlotKind] = [.terminal, .claudeCode, .codex, .browser]
+    private let kinds: [PaneSlotKind] = [.terminal, .claudeCode, .codex, .browser, .claudeChat, .chatgptChat]
 
     var body: some View {
         VStack(spacing: DesignTokens.Spacing.s4) {
