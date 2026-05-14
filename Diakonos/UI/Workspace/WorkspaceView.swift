@@ -246,11 +246,22 @@ struct WorkspaceView: View {
     private func actionChip(for slot: PaneSlot) -> some View {
         switch slot.kind {
         case .claudeCode:
-            ClaudeCodeFolderChip(preferences: preferences)
+            HStack(spacing: 6) {
+                PaneModeChip(slot: slot, layout: layout)
+                ClaudeCodeFolderChip(preferences: preferences)
+            }
         case .codex:
-            CodexFolderChip(preferences: preferences)
+            HStack(spacing: 6) {
+                PaneModeChip(slot: slot, layout: layout)
+                CodexFolderChip(preferences: preferences)
+            }
         case .claudeChat, .chatgptChat:
-            RoutingBadge(slot: slot)
+            HStack(spacing: 6) {
+                PaneModeChip(slot: slot, layout: layout)
+                RoutingBadge(slot: slot)
+            }
+        case .browser:
+            PaneModeChip(slot: slot, layout: layout)
         default:
             EmptyView()
         }

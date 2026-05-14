@@ -113,11 +113,25 @@ struct PaneSlot: Identifiable, Codable, Equatable {
     let position: PaneSlotPosition
     var kind: PaneSlotKind
     var viewState: PaneSlotViewState
+    /// v1.7: routing role. `nil` means "use `PaneMode.defaultMode(for: kind)`."
+    /// Stored separately so reassigning the slot's kind also resets to the
+    /// new kind's default mode unless the user has explicitly chosen one.
+    var mode: PaneMode?
 
-    init(id: UUID = UUID(), position: PaneSlotPosition, kind: PaneSlotKind, viewState: PaneSlotViewState = .normal) {
+    init(id: UUID = UUID(),
+         position: PaneSlotPosition,
+         kind: PaneSlotKind,
+         viewState: PaneSlotViewState = .normal,
+         mode: PaneMode? = nil) {
         self.id = id
         self.position = position
         self.kind = kind
         self.viewState = viewState
+        self.mode = mode
+    }
+
+    /// Resolved mode: explicit `mode` if set, else the kind's default.
+    var resolvedMode: PaneMode {
+        mode ?? PaneMode.defaultMode(for: kind)
     }
 }

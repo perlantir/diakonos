@@ -18,6 +18,14 @@ final class ChatPaneSandbox: ObservableObject {
         case claudeChat
         case chatgptChat
 
+        /// Short stable identifier, used by `RouteEnvelope.sourcePane`.
+        var rawIdentifier: String {
+            switch self {
+            case .claudeChat:  return "claudeChat"
+            case .chatgptChat: return "chatgptChat"
+            }
+        }
+
         var domain: String {
             switch self {
             case .claudeChat:  return "https://claude.ai"

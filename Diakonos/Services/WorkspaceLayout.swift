@@ -10,8 +10,14 @@ final class WorkspaceLayout: ObservableObject {
 
     /// v1 schema (pre-v1.6): [PaneSlot] of length 4 in fourPaneOrder.
     static let userDefaultsKeyV1 = "workspaceLayout.slots.v1"
-    /// v2 schema (v1.6+): { paneCount: 4|6, slots: [PaneSlot of length 6] }.
+    /// v2 schema (v1.6): { paneCount: 4|6, slots: [PaneSlot of length 6] }.
+    /// PaneSlot lacked a `mode` field.
     static let userDefaultsKeyV2 = "workspaceLayout.v2"
+    /// v3 schema (v1.7+): { paneCount, slots } where each PaneSlot carries
+    /// an optional `mode: PaneMode`. v2 data is migrated by promoting each
+    /// slot into the same shape with `mode = nil` (resolved at use time
+    /// from `PaneMode.defaultMode(for: kind)`).
+    static let userDefaultsKeyV3 = "workspaceLayout.v3"
 
     /// All six slots, always. `paneCount` controls which are rendered. This
     /// lets 6→4→6 toggles preserve what was in `.topMid` / `.bottomMid`.
@@ -33,20 +39,38 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     init() {
-        // Prefer v2 if present, else migrate v1.
-        if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV2),
+        // Prefer v3, fall back to v2 with mode-defaulting migration, fall
+        // back to v1 (pre-v1.6 four-slot array).
+        if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV3),
            let decoded = try? JSONDecoder().decode(PersistedV2.self, from: data),
            decoded.slots.count == 6 {
             slots = decoded.slots
             paneCount = decoded.paneCount
+        } else if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV2),
+                  let decoded = try? JSONDecoder().decode(PersistedV2Legacy.self, from: data),
+                  decoded.slots.count == 6 {
+            // v2 → v3: each slot's `mode` becomes nil (resolved at use
+            // time from PaneMode.defaultMode(for: kind)). This is the
+            // "v1.7 silent default change": existing .claudeChat slots
+            // resolve to .soloChat (no routing) instead of v1.6's
+            // implicit-always-route.
+            slots = decoded.slots.map {
+                PaneSlot(id: $0.id, position: $0.position, kind: $0.kind,
+                         viewState: $0.viewState, mode: nil)
+            }
+            paneCount = decoded.paneCount
+            persist()
         } else if let data = UserDefaults.standard.data(forKey: Self.userDefaultsKeyV1),
-                  let decoded = try? JSONDecoder().decode([PaneSlot].self, from: data),
+                  let decoded = try? JSONDecoder().decode([PaneSlotV1].self, from: data),
                   decoded.count == 4 {
-            // Migrate: keep TL/TR/BL/BR; append empty .topMid + .bottomMid.
+            // v1 → v3: same as v1.6 migration plus mode=nil.
             var migrated: [PaneSlot] = []
             for pos in PaneSlotPosition.sixPaneOrder {
                 if let existing = decoded.first(where: { $0.position == pos }) {
-                    migrated.append(existing)
+                    migrated.append(PaneSlot(id: existing.id, position: pos,
+                                             kind: existing.kind,
+                                             viewState: existing.viewState,
+                                             mode: nil))
                 } else {
                     migrated.append(PaneSlot(position: pos, kind: .empty))
                 }
@@ -55,6 +79,20 @@ final class WorkspaceLayout: ObservableObject {
             paneCount = .four
             persist()
         }
+    }
+
+    /// v1 wire format (pre-v1.6) — a flat `[PaneSlot]` of length 4. No mode.
+    private struct PaneSlotV1: Decodable {
+        let id: UUID
+        let position: PaneSlotPosition
+        let kind: PaneSlotKind
+        let viewState: PaneSlotViewState
+    }
+    /// v2 wire format (v1.6) — PaneSlot without `mode`. Decoded explicitly
+    /// because adding `mode: PaneMode?` to PaneSlot changed Codable shape.
+    private struct PersistedV2Legacy: Decodable {
+        let paneCount: WorkspacePaneCount
+        let slots: [PaneSlotV1]
     }
 
     // MARK: - Mutations
@@ -82,7 +120,16 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     func assign(_ id: UUID, kind: PaneSlotKind) {
-        update(id) { $0.kind = kind; $0.viewState = .normal }
+        // Reassigning the kind resets `mode` to nil so the resolved mode
+        // becomes the new kind's default (per PaneMode.defaultMode).
+        update(id) { $0.kind = kind; $0.viewState = .normal; $0.mode = nil }
+    }
+
+    /// Set the routing mode for a slot. Used by the pane header chip.
+    /// Caller is responsible for restricting this to chat-kind panes;
+    /// `PaneModeChip` does the gating.
+    func setMode(_ id: UUID, mode: PaneMode) {
+        update(id) { $0.mode = mode }
     }
 
     func close(_ id: UUID) {
@@ -164,9 +211,11 @@ final class WorkspaceLayout: ObservableObject {
     }
 
     private func persist() {
+        // Write v3 only. v2 keys are left in place for one release as a
+        // rollback safety net; we read v3 first.
         let payload = PersistedV2(paneCount: paneCount, slots: slots)
         if let data = try? JSONEncoder().encode(payload) {
-            UserDefaults.standard.set(data, forKey: Self.userDefaultsKeyV2)
+            UserDefaults.standard.set(data, forKey: Self.userDefaultsKeyV3)
         }
     }
 

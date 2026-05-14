@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum PreferenceTab: String, CaseIterable, Identifiable, Hashable {
-    case general, panes, shortcuts, diagnostics, about
+    case general, panes, roleCards, shortcuts, diagnostics, about
 
     var id: String { rawValue }
 
@@ -9,6 +9,7 @@ enum PreferenceTab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general:     return "General"
         case .panes:       return "Panes"
+        case .roleCards:   return "Role Cards"
         case .shortcuts:   return "Shortcuts"
         case .diagnostics: return "Diagnostics"
         case .about:       return "About"
@@ -19,6 +20,7 @@ enum PreferenceTab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general:     return "gearshape"
         case .panes:       return "square.grid.2x2"
+        case .roleCards:   return "text.bubble"
         case .shortcuts:   return "command"
         case .diagnostics: return "waveform"
         case .about:       return "info.circle"
@@ -66,6 +68,7 @@ struct PreferencesWindow: View {
         switch selection {
         case .general:     GeneralSection(preferences: preferences)
         case .panes:       PanesSection(preferences: preferences)
+        case .roleCards:   RoleCardsSection()
         case .shortcuts:   ShortcutsSection()
         case .diagnostics: DiagnosticsSection()
         case .about:       AboutSection()

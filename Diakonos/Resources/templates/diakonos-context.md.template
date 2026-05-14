@@ -1,0 +1,20 @@
+# .diakonos/context.md
+
+Diakonos-specific project context. Auto-created by Diakonos; lives under
+`.diakonos/` so it's easy to gitignore if you want it local-only.
+
+This is the place for context that the **coordinator** chat (claude.ai
+or chatgpt.com) should know about, but that doesn't belong in your
+project's canonical `AGENTS.md` (which other tools also read).
+
+Examples of what to put here:
+
+- Active work-in-progress: "Currently rewriting the auth flow, ignore
+  the v1 code in `legacy/auth/`."
+- Personal preferences: "I prefer functional style; suggest pure
+  functions when refactoring."
+- Local-only secrets or test data hints.
+- Ad-hoc notes for the coordinator chat: "If I ask for a feature you
+  think is a bad idea, push back once before implementing."
+
+Diakonos reads this on every route alongside AGENTS.md and CLAUDE.md.

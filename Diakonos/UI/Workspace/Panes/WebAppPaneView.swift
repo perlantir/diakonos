@@ -12,6 +12,7 @@ struct WebAppPaneView: View {
     var focusPosition: PaneSlotPosition? = nil
 
     @EnvironmentObject private var preferences: Preferences
+    @EnvironmentObject private var layout: WorkspaceLayout
     @StateObject private var sandbox: ChatPaneSandbox
     @State private var hasFocus = false
 
@@ -39,7 +40,14 @@ struct WebAppPaneView: View {
         }
         .onAppear {
             sandbox.start()
-            ChatBridge.shared.register(sandbox: sandbox)
+            // v1.7: register with a live mode provider so PaneModeChip
+            // toggles take effect mid-conversation. The provider reads
+            // the slot's resolvedMode from the workspace layout.
+            ChatBridge.shared.register(sandbox: sandbox, modeProvider: { [layout, focusPosition] in
+                guard let pos = focusPosition,
+                      let slot = layout.slot(at: pos) else { return .soloChat }
+                return slot.resolvedMode
+            })
         }
         .onDisappear {
             ChatBridge.shared.unregister(sandbox: sandbox)

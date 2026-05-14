@@ -13,25 +13,40 @@ enum ChatPostbackJS {
     // MARK: - Reading the latest user message
 
     /// claude.ai: user messages live in elements with
-    /// `data-testid="user-message"` (current as of 2026-05-13). The latest
-    /// is the last one in DOM order. Returns its textContent.
+    /// `data-testid="user-message"`. Empirically verified 2026-05-14
+    /// (synthetic DOM probe) that this selector ONLY matches user-authored
+    /// nodes; assistant emissions of "Code:" do NOT register.
+    ///
+    /// Returns a `id|||text` shape so the caller can dedupe on stable
+    /// per-message IDs instead of text hashing. claude.ai exposes
+    /// `data-message-id` on the same element; if it's missing we fall
+    /// back to text hash.
     static let readLatestUserMessageClaude: String = """
     (() => {
       const nodes = document.querySelectorAll('[data-testid="user-message"]');
       if (!nodes || nodes.length === 0) return null;
       const last = nodes[nodes.length - 1];
-      return (last.innerText || last.textContent || '').trim();
+      const text = (last.innerText || last.textContent || '').trim();
+      const mid = last.getAttribute('data-message-id') ||
+                  last.getAttribute('data-message-uuid') ||
+                  ('hash:' + text.length + ':' + text.slice(0, 32));
+      return mid + '|||' + text;
     })()
     """
 
     /// chatgpt.com: user messages live in elements with
-    /// `data-message-author-role="user"` (current as of 2026-05-13).
+    /// `data-message-author-role="user"`. Empirically verified
+    /// 2026-05-14 that this selector ONLY matches user-authored nodes.
+    /// `data-message-id` on the same element gives a stable dedupe key.
     static let readLatestUserMessageChatGPT: String = """
     (() => {
       const nodes = document.querySelectorAll('[data-message-author-role="user"]');
       if (!nodes || nodes.length === 0) return null;
       const last = nodes[nodes.length - 1];
-      return (last.innerText || last.textContent || '').trim();
+      const text = (last.innerText || last.textContent || '').trim();
+      const mid = last.getAttribute('data-message-id') ||
+                  ('hash:' + text.length + ':' + text.slice(0, 32));
+      return mid + '|||' + text;
     })()
     """
 

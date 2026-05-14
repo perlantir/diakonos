@@ -9,6 +9,14 @@ struct DiakonosApp: App {
         // v1.4: bootstrap MCP registration synchronously BEFORE any pane
         // spawns so claude/codex see the server at their startup.
         MCPRegistration.shared.bootstrap()
+        // v1.7: ensure ~/Library/Application Support/Diakonos/ + subdirs
+        // exist so RoleCardStore can seed bundled defaults on first run.
+        ApplicationSupport.ensureDirectories()
+        // v1.7: empirical self-test for the CWD fix in RouteDispatcher.
+        // Runs once at startup; result logged to NSLog. Fails loudly in
+        // DEBUG via assertionFailure. Independent of end-to-end routing —
+        // proves the subprocess-CWD plumbing works before any user route.
+        Task { @MainActor in await CWDSelfTest.run() }
     }
 
     var body: some Scene {

@@ -1,0 +1,41 @@
+# AGENTS.md
+
+Canonical AI-agent context for this project. Read by Diakonos coordinators
+(claude.ai / chatgpt.com chat panes) and implementers (Claude Code, Codex).
+`CLAUDE.md` should import this via `@AGENTS.md` so Claude Code's own
+context loader picks it up.
+
+> This file was auto-created by Diakonos. Edit it freely — Diakonos
+> never overwrites it.
+
+## Project
+
+<One paragraph: what this project is and why it exists.>
+
+## Stack
+
+- Languages:
+- Frameworks / libraries:
+- Build / test:
+- Deploy:
+
+## Conventions
+
+- <e.g., camelCase for variables, no abbreviations in public APIs>
+- <e.g., comments only where the WHY is non-obvious>
+- <e.g., no test scaffolding for one-off scripts>
+
+## Don't
+
+- <e.g., don't add dependencies without flagging>
+- <e.g., don't reformat unrelated files>
+
+## Files of interest
+
+- `path/to/file.ext`: <one-line "what's in it">
+- `another/path.ext`: <one-line "what's in it">
+
+## How agents should behave here
+
+<Any tone / approach guidance — e.g., "Prefer pragmatic fixes over
+re-architecting" or "This is a v1 demo; perfection is not the bar.">
