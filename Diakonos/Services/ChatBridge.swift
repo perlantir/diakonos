@@ -54,6 +54,22 @@ final class ChatBridge {
     /// Per-conversation Full Auto state (turn count + stop flag).
     private var autoTurnCount: [String: Int] = [:]
     private var stopRequested: Set<String> = []
+    /// v1.7.1 echo-loop fix.
+    ///
+    /// When Diakonos posts a reply into the chat textarea and the user
+    /// (or auto-Send) submits it, that exact text becomes a new
+    /// user-authored DOM node on next poll. v1.7 saw it, classified it
+    /// as `.continueThread`, and re-routed Diakonos's own reply back to
+    /// claude --print — producing an envelope echo loop that
+    /// claude.ai eventually refused.
+    ///
+    /// Fix: per-conversation LRU(~20) of recently-posted reply hashes.
+    /// In `poll`, before calling `handle`, hash the scraped user-message
+    /// text and check. On match: log `route_closed` for
+    /// `lastPostedRouteID[conv]` and return.
+    private let postedHashesLRUCap = 20
+    private var pendingPostedHashes: [String: [Int]] = [:]
+    private var lastPostedRouteID:   [String: UUID] = [:]
 
     struct Thread {
         let target: TriggerDetector.RouteTarget
@@ -180,8 +196,17 @@ final class ChatBridge {
         if let (msgID, msg) = await scrapeLatestMessage(sandbox: sandbox, fromAssistant: false),
            lastSeenUserID[key] != "\(convo)|\(msgID)" {
             lastSeenUserID[key] = "\(convo)|\(msgID)"
-            await handle(sandbox: sandbox, conversationID: convo, message: msg,
-                         postbackMode: postback, source: .user)
+            // v1.7.1: echo-loop guard. If the scraped user message
+            // matches a recently-posted Diakonos reply, the user (or
+            // auto-Send) just submitted our own output. The route is
+            // complete — do NOT classify or re-route.
+            if isEchoOfRecentPostback(message: msg, conversationID: convo) {
+                noteRouteClosed(conversationID: convo,
+                                detail: "Diakonos's posted reply was sent — route closed (echo dedupe)")
+            } else {
+                await handle(sandbox: sandbox, conversationID: convo, message: msg,
+                             postbackMode: postback, source: .user)
+            }
         }
 
         // 2) In FullAuto, additionally scrape assistant messages.
@@ -200,6 +225,58 @@ final class ChatBridge {
     /// Per-message source. In FullAuto, both user AND assistant trigger;
     /// in other modes, ONLY user.
     private enum MessageSource { case user, assistant }
+
+    // MARK: - v1.7.1 echo-loop helpers
+
+    /// Stable hash for echo dedupe. Normalizes whitespace so a stray
+    /// trailing newline or extra space introduced by the DOM round-trip
+    /// doesn't break the match. `String.hashValue` is randomized per
+    /// process launch, which is fine: dedupe is in-memory only and
+    /// scoped to one app session.
+    private static func normalizedHash(_ s: String) -> Int {
+        let collapsed = s
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return collapsed.hashValue
+    }
+
+    /// Returns true if `message` was recently posted by Diakonos into
+    /// `conversationID`'s textarea. LRU is appended at the tail and
+    /// dropped from the head; cap is `postedHashesLRUCap`.
+    private func isEchoOfRecentPostback(message: String, conversationID: String) -> Bool {
+        guard let hashes = pendingPostedHashes[conversationID], !hashes.isEmpty else { return false }
+        return hashes.contains(Self.normalizedHash(message))
+    }
+
+    /// Append a posted-reply hash for this conversation. Caps the LRU.
+    private func recordPostedHash(_ body: String, conversationID: String, routeID: UUID) {
+        var list = pendingPostedHashes[conversationID] ?? []
+        list.append(Self.normalizedHash(body))
+        if list.count > postedHashesLRUCap {
+            list.removeFirst(list.count - postedHashesLRUCap)
+        }
+        pendingPostedHashes[conversationID] = list
+        lastPostedRouteID[conversationID] = routeID
+    }
+
+    /// Log a `route_closed` event for the conversation's last posted
+    /// route (if any), and clear the route handle. The state machine
+    /// itself is local to `runRoute` and out of scope here; logging
+    /// directly is fine — the JSONL log is the source of truth.
+    private func noteRouteClosed(conversationID: String, detail: String) {
+        if let routeID = lastPostedRouteID[conversationID] {
+            SessionEventLog.append(.init(
+                timestamp: Date(),
+                kind: .routeClosed,
+                routeID: routeID,
+                conversationID: conversationID,
+                state: .closed,
+                detail: detail
+            ))
+            lastPostedRouteID[conversationID] = nil
+        }
+        DiagnosticsLog.shared.log(.info, "echo dedupe: \(detail)")
+    }
 
     private func scrapeLatestMessage(sandbox: ChatPaneSandbox,
                                      fromAssistant: Bool) async -> (id: String, text: String)? {
@@ -234,6 +311,10 @@ final class ChatBridge {
         case .exit:
             threads[conversationID] = nil
             autoTurnCount[conversationID] = 0
+            // v1.7.1: also clear echo-dedupe state so a fresh thread
+            // after Exit: starts with a clean ledger.
+            pendingPostedHashes[conversationID] = nil
+            lastPostedRouteID[conversationID] = nil
             DiagnosticsLog.shared.log(.triggerDetected, "Exit: cleared thread for \(conversationID.prefix(8))")
             SessionEventLog.append(.init(timestamp: Date(),
                                          kind: .routeClosed,
@@ -265,6 +346,16 @@ final class ChatBridge {
                            target: target, payload: payload, postback: postbackMode)
 
         case .continueThread(let payload):
+            // v1.7.1: continuation routes only when postback is .autoSend
+            // or .fullAuto. Manual mode requires an explicit Code:/Codex:
+            // prefix on every message — v1.7 shipped with Manual
+            // implicitly auto-routing every plain user message inside
+            // an active thread, which is what allowed the echo loop.
+            guard postbackMode.sendsAutomatically else {
+                DiagnosticsLog.shared.log(.info,
+                    "Manual mode: plain user message in active thread — no route (use Code:/Codex: to start a new route)")
+                return
+            }
             guard let thread = threads[conversationID] else { return }
             await runRoute(sandbox: sandbox, conversationID: conversationID,
                            target: thread.target, payload: payload, postback: postbackMode)
@@ -361,6 +452,10 @@ final class ChatBridge {
             return
         }
         await postReply(sandbox: sandbox, body: result.body, postback: postback)
+        // v1.7.1: record the posted body's hash so the next poll
+        // recognises the same content coming back (after user-send or
+        // auto-Send) as Diakonos's own output and refuses to re-route it.
+        recordPostedHash(result.body, conversationID: conversationID, routeID: envelope.routeID)
         sm.transition(to: .draftPostedToChat)
         sm.transition(to: .awaitingUserReview)
         DiagnosticsLog.shared.log(.postedToChat,
